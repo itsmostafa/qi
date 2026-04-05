@@ -1,0 +1,51 @@
+# qi configuration — annotated example
+# Copy to ~/.config/qi/config.yaml and customize.
+
+# Path to the SQLite database (supports ~ expansion)
+database_path: ~/.local/share/qi/qi.db
+
+# Collections: directories of documents to index
+collections:
+  - name: notes
+    path: ~/notes
+    description: Personal notes and documents
+    extensions: [.md, .txt]     # Omit to use defaults (.md, .txt, .go, .ts, etc.)
+    ignore: [.git, node_modules, .DS_Store]
+
+  - name: code
+    path: ~/Projects/myproject
+    description: Source code for myproject
+    extensions: [.go, .ts, .py]
+    ignore: [vendor, node_modules, dist, .git]
+
+providers:
+  # Embedding provider for vector search (OpenAI-compatible /v1/embeddings)
+  # Uncomment to enable hybrid search with local Ollama or llama.cpp
+  # embedding:
+  #   name: ollama
+  #   base_url: http://localhost:11434
+  #   model: nomic-embed-text
+  #   dimension: 768
+  #   batch_size: 32
+
+  # Reranking provider (optional, used with --mode deep)
+  # rerank:
+  #   name: local-rerank
+  #   base_url: http://localhost:8080
+  #   model: bge-reranker-v2-m3
+
+  # Generation provider for `qi ask` (OpenAI-compatible /v1/chat/completions)
+  # generation:
+  #   name: ollama
+  #   base_url: http://localhost:11434
+  #   model: llama3.2
+  #   api_key: ""   # Set for OpenAI-compatible services that require a key
+
+search:
+  default_mode: hybrid   # lexical | hybrid | deep
+  bm25_top_k: 50         # Candidates from BM25 for fusion
+  vector_top_k: 50       # Candidates from vector search for fusion
+  rerank_top_k: 10       # Top N passed to reranker in deep mode
+  rrf_k: 60              # Reciprocal Rank Fusion constant (default 60)
+  chunk_size: 512        # Target chunk size in characters
+  chunk_overlap: 64      # Not used in break-point chunker (reserved)
