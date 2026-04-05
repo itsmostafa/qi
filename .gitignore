@@ -47,5 +47,6 @@ debug
 # AI
 ai_docs/
 .claude/
-.qbit/
-.ralph/
+
+# Taskfile
+.task/
