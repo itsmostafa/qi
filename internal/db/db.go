@@ -54,3 +54,64 @@ func Open(ctx context.Context, path string) (*DB, error) {
 func (db *DB) Ping(ctx context.Context) error {
 	return db.PingContext(ctx)
 }
+
+// DeleteCollection removes all data associated with the given collection name:
+// chunk vectors, embeddings, chunks (FTS triggers keep chunks_fts in sync),
+// documents, index runs, and the collections table row. Orphaned content blobs
+// (not referenced by any remaining document) are also pruned.
+func (db *DB) DeleteCollection(ctx context.Context, name string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// chunk_vectors and embeddings for all chunks in this collection's documents
+	for _, table := range []string{"chunk_vectors", "embeddings"} {
+		_, err := tx.ExecContext(ctx, `
+			DELETE FROM `+table+` WHERE chunk_id IN (
+				SELECT c.id FROM chunks c
+				JOIN documents d ON d.id = c.doc_id
+				WHERE d.collection = ?
+			)`, name)
+		if err != nil {
+			return fmt.Errorf("deleting %s: %w", table, err)
+		}
+	}
+
+	// chunks (FTS triggers handle chunks_fts automatically)
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM chunks WHERE doc_id IN (
+			SELECT id FROM documents WHERE collection = ?
+		)`, name); err != nil {
+		return fmt.Errorf("deleting chunks: %w", err)
+	}
+
+	// documents
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM documents WHERE collection = ?`, name); err != nil {
+		return fmt.Errorf("deleting documents: %w", err)
+	}
+
+	// index run history
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM index_runs WHERE collection = ?`, name); err != nil {
+		return fmt.Errorf("deleting index_runs: %w", err)
+	}
+
+	// collections table row
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM collections WHERE name = ?`, name); err != nil {
+		return fmt.Errorf("deleting collection row: %w", err)
+	}
+
+	// orphaned content blobs (not referenced by any document)
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM content WHERE hash NOT IN (
+			SELECT DISTINCT content_hash FROM documents
+		)`); err != nil {
+		return fmt.Errorf("pruning orphaned content: %w", err)
+	}
+
+	return tx.Commit()
+}

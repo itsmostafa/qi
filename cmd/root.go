@@ -40,4 +40,6 @@ func init() {
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(statsCmd)
 	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(deleteCmd)
 }

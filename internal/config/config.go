@@ -210,6 +210,46 @@ func AddCollection(configPath string, col Collection) error {
 	return writeConfigNode(configPath, &doc)
 }
 
+// RemoveCollection removes a named collection from the config file at configPath.
+// Existing YAML comments and structure are preserved via yaml.Node round-trip.
+// Returns an error if the collection name is not found.
+func RemoveCollection(configPath string, name string) error {
+	if configPath == "" {
+		configPath = DefaultConfigPath()
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("reading config: %w", err)
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parsing config: %w", err)
+	}
+	if len(doc.Content) == 0 {
+		return fmt.Errorf("empty config document")
+	}
+	root := doc.Content[0]
+
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value != "collections" {
+			continue
+		}
+		seq := root.Content[i+1]
+		for j, item := range seq.Content {
+			for k := 0; k+1 < len(item.Content); k += 2 {
+				if item.Content[k].Value == "name" && item.Content[k+1].Value == name {
+					seq.Content = append(seq.Content[:j], seq.Content[j+1:]...)
+					return writeConfigNode(configPath, &doc)
+				}
+			}
+		}
+		return fmt.Errorf("collection %q not found in config", name)
+	}
+	return fmt.Errorf("collection %q not found in config", name)
+}
+
 func collectionToNode(col Collection) *yaml.Node {
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	add := func(k, v string) {
