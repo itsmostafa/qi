@@ -1,0 +1,31 @@
+{
+  "name": "qi",
+  "owner": {
+    "name": "itsmostafa"
+  },
+  "plugins": [
+    {
+      "name": "qi",
+      "source": ".",
+      "description": "Local knowledge search CLI — index documents and search them using BM25 full-text search, vector embeddings, and LLM-powered Q&A, all running locally with no external dependencies.",
+      "version": "0.3.0",
+      "author": {
+        "name": "itsmostafa"
+      },
+      "homepage": "https://github.com/itsmostafa/qi",
+      "repository": "https://github.com/itsmostafa/qi",
+      "license": "MIT",
+      "keywords": [
+        "search",
+        "knowledge-base",
+        "rag",
+        "bm25",
+        "vector-search",
+        "local-first",
+        "sqlite",
+        "cli"
+      ],
+      "skills": ["./skills/"]
+    }
+  ]
+}
