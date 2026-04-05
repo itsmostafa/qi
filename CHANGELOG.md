@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/itsmostafa/qi/compare/qi-v0.2.0...qi-v0.3.0) (2026-04-05)
+
+
+### Features
+
+* **cmd:** add self-update command ([94fbc0c](https://github.com/itsmostafa/qi/commit/94fbc0ca3ede848dd1aa4de1cb23b6194dc23af1))
+
 ## [0.2.0](https://github.com/itsmostafa/qi/compare/qi-v0.1.0...qi-v0.2.0) (2026-04-05)
 
 
