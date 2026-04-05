@@ -68,6 +68,7 @@ The `--name` flow and collection-name-arg flow are unchanged.
 - **`README.md`** — Quickstart section updated to show that `qi index` and `qi index <path>` automatically create a named collection. `--name` presented as optional override for custom names.
 - **`docs/named-collections.md`** — Updated to explain auto-naming, show example slug output, clarify `--name` is for custom names only.
 - **`skills/qi-cli/SKILL.md`** — Usage examples updated to reflect that `--name` is not required for manageable collections.
+- **`CLAUDE.md`** — Updated to document the auto-naming behavior so contributors understand the index command's collection management conventions.
 
 ## Data Model Impact
 
