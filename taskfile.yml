@@ -1,0 +1,39 @@
+version: '3'
+
+vars:
+  BINARY: qi
+
+tasks:
+  default:
+    desc: Build the binary
+    deps: [build]
+
+  build:
+    desc: Build the qi binary
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BINARY}}"
+    cmds:
+      - go build -o {{.BINARY}} .
+
+  test:
+    desc: Run all unit tests
+    cmds:
+      - go test ./...
+
+  test:verbose:
+    desc: Run all unit tests with verbose output
+    cmds:
+      - go test -v ./...
+
+  lint:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  check:
+    desc: Run lint and tests
+    deps: [lint, test]
