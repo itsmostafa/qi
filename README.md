@@ -13,7 +13,7 @@ A local-first knowledge search CLI for macOS and Linux. Index your documents and
 ## Features
 
 - **Blazing-fast full-text search** — BM25 via SQLite FTS5, no external search engine required
-- **Vector search that stays local** — embeddings stored and queried entirely on your machine; works with Ollama, LM Studio, llama.cpp, or any OpenAI-compatible provider
+- **Vector search that stays local** — embeddings stored and queried entirely on your machine; works with Ollama, LM Studio, llama.cpp, MLX or any OpenAI-compatible provider
 - **Hybrid search with RRF fusion** — combines BM25 and vector rankings for results that are both precise and semantically aware
 - **LLM-powered Q&A with citations** — ask questions in plain English and get grounded answers pointing back to your actual documents
 - **Smart chunking** — breakpoint scoring prioritizes headings, code fences, and paragraph boundaries so chunks stay meaningful, not arbitrary
@@ -31,6 +31,18 @@ Or via `go install`:
 
 ```sh
 go install github.com/itsmostafa/qi@latest
+```
+
+### Claude Code Plugin
+
+qi is available as a Claude Code plugin. Add the marketplace and install with:
+
+```
+# Add the marketplace
+/plugin marketplace add itsmostafa/qi
+
+# Install the plugin
+/plugin install qi
 ```
 
 ## Quickstart
