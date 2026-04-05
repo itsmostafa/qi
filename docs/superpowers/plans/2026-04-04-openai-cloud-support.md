@@ -228,13 +228,13 @@ go test ./internal/config/... -run "TestLoad_OpenAI" -v
 
 Expected: all 5 tests PASS.
 
-- [ ] **Step 3: Run the full config test suite**
+- [ ] **Step 3: Run `task check` to confirm all lint and tests pass**
 
 ```bash
-go test ./internal/config/... -v
+task check
 ```
 
-Expected: all tests PASS.
+Expected: `go vet ./...` and `go test ./...` both pass with no errors.
 
 - [ ] **Step 4: Commit**
 
@@ -350,13 +350,13 @@ if p.cfg.APIKey != "" {
 resp, err := p.client.Do(req)
 ```
 
-- [ ] **Step 4: Run the embedding provider tests**
+- [ ] **Step 4: Run `task check` to confirm all lint and tests pass**
 
 ```bash
-go test ./internal/providers/... -v
+task check
 ```
 
-Expected: all tests PASS.
+Expected: `go vet ./...` and `go test ./...` both pass with no errors.
 
 - [ ] **Step 5: Commit**
 
@@ -493,13 +493,13 @@ providers:
   #   model: gpt-4o-mini
 ```
 
-- [ ] **Step 4: Run the full test suite to confirm nothing is broken**
+- [ ] **Step 4: Run `task check` to confirm all lint and tests pass**
 
 ```bash
-go test ./... -v
+task check
 ```
 
-Expected: all tests PASS.
+Expected: `go vet ./...` and `go test ./...` both pass with no errors.
 
 - [ ] **Step 5: Commit**
 
