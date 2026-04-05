@@ -1,0 +1,11 @@
+Meeting notes 2026-04-04
+
+Discussed the qi project roadmap.
+Phase 1 through Phase 8 are planned.
+The most important phases are indexing and search.
+
+Key decisions:
+- Use ncruces/go-sqlite3 for CGo-free SQLite
+- Use sqlite-vec for vector search
+- Use FTS5 for BM25 full-text search
+- Content-addressable storage for deduplication
