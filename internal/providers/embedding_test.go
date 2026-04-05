@@ -86,3 +86,62 @@ func TestEmbeddingProvider_APIError(t *testing.T) {
 		t.Error("expected error for API error response")
 	}
 }
+
+func TestEmbeddingProvider_SendsAuthHeader(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		resp := embeddingResponse{}
+		resp.Data = append(resp.Data, struct {
+			Embedding []float32 `json:"embedding"`
+			Index     int       `json:"index"`
+		}{Embedding: []float32{1.0, 0.0}, Index: 0})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	cfg := &config.EmbeddingProviderConfig{
+		BaseURL:   srv.URL,
+		Model:     "test-model",
+		Dimension: 2,
+		APIKey:    "sk-test-key",
+	}
+	p := NewEmbedding(cfg)
+	_, err := p.Embed(context.Background(), []string{"hello"})
+	if err != nil {
+		t.Fatalf("Embed failed: %v", err)
+	}
+	if gotAuth != "Bearer sk-test-key" {
+		t.Errorf("expected Authorization: Bearer sk-test-key, got %q", gotAuth)
+	}
+}
+
+func TestEmbeddingProvider_NoAuthHeader_WhenKeyEmpty(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		resp := embeddingResponse{}
+		resp.Data = append(resp.Data, struct {
+			Embedding []float32 `json:"embedding"`
+			Index     int       `json:"index"`
+		}{Embedding: []float32{1.0, 0.0}, Index: 0})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	cfg := &config.EmbeddingProviderConfig{
+		BaseURL:   srv.URL,
+		Model:     "test-model",
+		Dimension: 2,
+	}
+	p := NewEmbedding(cfg)
+	_, err := p.Embed(context.Background(), []string{"hello"})
+	if err != nil {
+		t.Fatalf("Embed failed: %v", err)
+	}
+	if gotAuth != "" {
+		t.Errorf("expected no Authorization header, got %q", gotAuth)
+	}
+}
