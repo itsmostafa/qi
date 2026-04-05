@@ -1,4 +1,4 @@
-# qi - query search engine for ai agents
+# qi - query search engine cli for ai agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude](https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=fff)](https://claude.ai/code)
@@ -19,11 +19,15 @@ go install github.com/itsmostafa/qi@latest
 # Initialize config and database
 qi init
 
-# Edit config to point at your documents
-$EDITOR ~/.config/qi/config.yaml
-
-# Index your documents
+# Index current directory
 qi index
+
+# Or index a specific path
+qi index ~/notes
+
+# Or index a named collection from config
+$EDITOR ~/.config/qi/config.yaml  # Configure collections
+qi index notes
 
 # Search
 qi search "my query"
@@ -66,7 +70,7 @@ providers:
 | Command | Description |
 |---|---|
 | `qi init` | Create config and database |
-| `qi index [collection]` | Index all (or one) collection |
+| `qi index [path\|collection]` | Index directory (current dir by default) or named collection |
 | `qi search <query>` | BM25 full-text search |
 | `qi query <query>` | Hybrid search (BM25 + vector) |
 | `qi ask <question>` | RAG-powered answer with citations |
