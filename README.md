@@ -1,4 +1,4 @@
-# qi - query search engine cli for ai agents
+# qi - query search engine cli for ai agents and humans
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude](https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=fff)](https://claude.ai/code)
@@ -12,7 +12,16 @@ A local-first knowledge search CLI for macOS and Linux. Index your documents and
 
 ## Install
 
-<!--Not implemented.-->
+```sh
+brew tap itsmostafa/qi
+brew install qi
+```
+
+Or via `go install`:
+
+```sh
+go install github.com/itsmostafa/qi@latest
+```
 
 ## Quickstart
 
