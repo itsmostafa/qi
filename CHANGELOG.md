@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0](https://github.com/itsmostafa/qi/compare/v0.4.0...v0.5.0) (2026-04-05)
+
+
+### Features
+
+* auto-named collections and configuration reference ([7960559](https://github.com/itsmostafa/qi/commit/7960559d0ce011cc8fdd56d4dd17704fb2d45cc5))
+* **config:** add SlugFromPath for auto-generating collection names ([b80345d](https://github.com/itsmostafa/qi/commit/b80345dcc69050bee4c10d0a09723883bf6406ce))
+
+
+### Bug Fixes
+
+* **cmd:** rename existing collection when --name targets same path ([61d3600](https://github.com/itsmostafa/qi/commit/61d3600a905915ac8233214f330a118c23c7a077))
+* **config:** eliminate data-loss window in collection rename flow ([e66bb75](https://github.com/itsmostafa/qi/commit/e66bb75a56d8aafeb79227f793356b8292f34e55))
+* **index:** preserve collection settings on --name rename ([66a8056](https://github.com/itsmostafa/qi/commit/66a80567c6a3d4ad69f4a6d5fa6b5c88cafcc33a))
+* **testdata:** update config example path reference in intro.md ([3511a34](https://github.com/itsmostafa/qi/commit/3511a34aa54add3dc9c9ea8cc2d62a64eee414d1))
+
 ## [0.4.0](https://github.com/itsmostafa/qi/compare/v0.3.0...v0.4.0) (2026-04-05)
 
 
