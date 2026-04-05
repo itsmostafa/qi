@@ -10,6 +10,16 @@
 
 A local-first knowledge search CLI for macOS and Linux. Index your documents and search them using BM25 full-text search, vector embeddings, and LLM-powered Q&A — all running locally with no external dependencies.
 
+## Features
+
+- **Blazing-fast full-text search** — BM25 via SQLite FTS5, no external search engine required
+- **Vector search that stays local** — embeddings stored and queried entirely on your machine; works with Ollama, LM Studio, llama.cpp, or any OpenAI-compatible provider
+- **Hybrid search with RRF fusion** — combines BM25 and vector rankings for results that are both precise and semantically aware
+- **LLM-powered Q&A with citations** — ask questions in plain English and get grounded answers pointing back to your actual documents
+- **Smart chunking** — breakpoint scoring prioritizes headings, code fences, and paragraph boundaries so chunks stay meaningful, not arbitrary
+- **Zero-dependency storage** — a single SQLite file holds your entire index; content-addressable blobs (SHA-256) eliminate duplicates automatically
+- **Works offline, always** — vector search and Q&A are optional enhancements; BM25 search works out of the box with no providers configured
+
 ## Install
 
 ```sh
@@ -102,13 +112,6 @@ providers:
     base_url: http://localhost:11434
     model: llama3.2
 ```
-
-## Architecture
-
-- **Storage**: SQLite with content-addressable blobs (SHA-256 keyed `content` table), FTS5 for BM25, BLOB-stored embeddings for vector KNN search
-- **Chunking**: Break-point scoring (headings=100, code fences=80, blank lines=20) with distance decay from target chunk size
-- **Providers**: OpenAI-compatible HTTP API adapters (Ollama, llama.cpp, etc.)
-- **Graceful degradation**: Vector search and Q&A are optional — BM25 always works
 
 ## Document IDs
 
