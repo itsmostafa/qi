@@ -121,9 +121,18 @@ Use `--explain` to see scoring breakdown:
 qi query "chunking algorithm" --mode hybrid --explain
 ```
 
+## Documentation
+
+Full documentation is in the [`docs/`](docs/) directory:
+
+- [`docs/architecture.md`](docs/architecture.md) — system architecture, data flows, and design decisions
+- [`docs/configuration.md`](docs/configuration.md) — all config options with explanations
+- [`docs/config.example.yaml`](docs/config.example.yaml) — fully annotated example config
+- [`docs/named-collections.md`](docs/named-collections.md) — named collections guide
+
 ## Configuration
 
-The config lives at `~/.config/qi/config.yaml`. See [`config.example.yaml`](config.example.yaml) for a fully annotated example.
+The config lives at `~/.config/qi/config.yaml`. See [`docs/configuration.md`](docs/configuration.md) for all options or [`docs/config.example.yaml`](docs/config.example.yaml) for a fully annotated example.
 
 ```yaml
 database_path: ~/.local/share/qi/qi.db
