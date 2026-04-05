@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/itsmostafa/qi/compare/v0.3.0...v0.4.0) (2026-04-05)
+
+
+### Features
+
+* **cmd:** add list and delete collection commands ([d1e8ff1](https://github.com/itsmostafa/qi/commit/d1e8ff1c5e374fb5149398cd1bfdfb1e326e00cb))
+* **config:** add APIKey to EmbeddingProviderConfig and applyEnvOverrides for openai preset ([c1e20ba](https://github.com/itsmostafa/qi/commit/c1e20ba78af210248222fd19523548b70f2cbec1))
+* **index:** add --name flag to save directories as named collections ([6a40091](https://github.com/itsmostafa/qi/commit/6a4009128db77d813a3d4c99305ca90ec5a720aa))
+* **providers:** send Authorization header in embedding provider when api_key is set ([a0317d6](https://github.com/itsmostafa/qi/commit/a0317d6c24fabf36ac157047114538fbe4845d7e))
+
+
+### Bug Fixes
+
+* **db:** add migration to create chunk_vectors and embeddings tables ([461bea6](https://github.com/itsmostafa/qi/commit/461bea64d14e113f305f27245de607fba2c0e5cd))
+* **search:** strip punctuation and stop words from FTS5 queries ([59ee4ab](https://github.com/itsmostafa/qi/commit/59ee4abf9cc0688194a7c95769214ec4267b371b))
+* **update:** match tar.gz release assets and detect Homebrew installs ([35154c8](https://github.com/itsmostafa/qi/commit/35154c8900653370098be20e6f7008f493817e0f))
+
 ## [0.3.0](https://github.com/itsmostafa/qi/compare/v0.2.0...v0.3.0) (2026-04-05)
 
 
