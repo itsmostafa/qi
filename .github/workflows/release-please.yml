@@ -141,7 +141,7 @@ jobs:
       - name: Update formula
         run: |
           TAG="${{ needs.release-please.outputs.tag_name }}"
-          VERSION="${TAG#qi-v}"
+          VERSION="${TAG#v}"
           FORMULA="homebrew-qi/Formula/qi.rb"
 
           sed -i "s/^  version \".*\"/  version \"${VERSION}\"/" "$FORMULA"
@@ -157,7 +157,7 @@ jobs:
       - name: Commit and push
         run: |
           TAG="${{ needs.release-please.outputs.tag_name }}"
-          VERSION="${TAG#qi-v}"
+          VERSION="${TAG#v}"
           cd homebrew-qi
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
