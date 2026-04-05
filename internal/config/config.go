@@ -292,16 +292,32 @@ func RemoveCollection(configPath string, name string) error {
 
 func collectionToNode(col Collection) *yaml.Node {
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	add := func(k, v string) {
+	addStr := func(k, v string) {
 		m.Content = append(m.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: k},
 			&yaml.Node{Kind: yaml.ScalarNode, Value: v},
 		)
 	}
-	add("name", col.Name)
-	add("path", col.Path)
+	addSeq := func(k string, vals []string) {
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, v := range vals {
+			seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: v})
+		}
+		m.Content = append(m.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: k},
+			seq,
+		)
+	}
+	addStr("name", col.Name)
+	addStr("path", col.Path)
 	if col.Description != "" {
-		add("description", col.Description)
+		addStr("description", col.Description)
+	}
+	if len(col.Extensions) > 0 {
+		addSeq("extensions", col.Extensions)
+	}
+	if len(col.Ignore) > 0 {
+		addSeq("ignore", col.Ignore)
 	}
 	return m
 }
