@@ -85,11 +85,57 @@ func (b *BM25) Search(ctx context.Context, opts SearchOpts) ([]Result, error) {
 	return results, rows.Err()
 }
 
-// sanitizeFTSQuery wraps each term in double-quotes to prevent FTS5 syntax errors.
+// ftsStopWords are common English words excluded from FTS5 queries to avoid
+// zero-result conjunctions when searching natural-language questions.
+var ftsStopWords = map[string]bool{
+	"a": true, "an": true, "the": true,
+	"in": true, "on": true, "at": true, "to": true, "for": true, "of": true,
+	"with": true, "from": true, "by": true, "as": true, "into": true, "about": true,
+	"and": true, "or": true, "but": true, "nor": true,
+	"what": true, "who": true, "which": true, "when": true, "where": true, "why": true, "how": true,
+	"is": true, "are": true, "was": true, "were": true, "be": true, "been": true, "being": true,
+	"have": true, "has": true, "had": true, "do": true, "does": true, "did": true,
+	"will": true, "would": true, "could": true, "should": true, "may": true, "might": true,
+	"it": true, "its": true, "this": true, "that": true, "these": true, "those": true,
+	"i": true, "me": true, "my": true, "we": true, "our": true,
+	"you": true, "your": true, "he": true, "she": true, "they": true, "them": true,
+	"not": true, "if": true, "then": true, "so": true, "up": true, "out": true,
+}
+
+// sanitizeFTSQuery builds a safe FTS5 query from a natural-language string.
+// It strips punctuation, filters stop words, and quotes each remaining term.
+// If all terms are stop words, falls back to quoting all non-empty terms.
 func sanitizeFTSQuery(q string) string {
 	terms := strings.Fields(q)
-	quoted := make([]string, 0, len(terms))
+
+	stripPunct := func(t string) string {
+		return strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+				return r
+			}
+			return -1
+		}, t)
+	}
+
+	var meaningful, all []string
 	for _, t := range terms {
+		c := stripPunct(t)
+		if c == "" {
+			continue
+		}
+		all = append(all, c)
+		if !ftsStopWords[strings.ToLower(c)] {
+			meaningful = append(meaningful, c)
+		}
+	}
+
+	chosen := meaningful
+	if len(chosen) == 0 {
+		chosen = all
+	}
+
+	quoted := make([]string, 0, len(chosen))
+	for _, t := range chosen {
 		t = strings.ReplaceAll(t, `"`, `""`)
 		quoted = append(quoted, `"`+t+`"`)
 	}
