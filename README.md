@@ -81,6 +81,9 @@ qi query "my query" --mode hybrid -c notes
 # Ask a question (requires generation provider)
 qi ask "how does X work?"
 
+# Ask a question to a specific collection
+qi ask "how does X work?" -c notes
+
 # Health check
 qi doctor
 ```
