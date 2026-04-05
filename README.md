@@ -53,6 +53,7 @@ qi is available as a Claude Code plugin. Add the marketplace and install with:
 qi init
 
 # Index current directory
+# And re-index all saved collections at once
 qi index
 
 # Or index a specific path
@@ -63,9 +64,6 @@ qi index ~/notes --name notes
 
 # Re-index it later by name
 qi index notes
-
-# Re-index all saved collections at once
-qi index
 
 # Search
 qi search "my query"
@@ -85,6 +83,12 @@ qi ask "how does X work?"
 # Ask a question to a specific collection
 qi ask "how does X work?" -c notes
 
+# List all named collections
+qi list
+
+# Delete a named collection and all its indexed data
+qi delete notes
+
 # Health check
 qi doctor
 ```
@@ -99,6 +103,8 @@ qi doctor
 | `qi query <query>` | Hybrid search (BM25 + vector) |
 | `qi ask <question>` | RAG-powered answer with citations |
 | `qi get <id>` | Retrieve document by 6-char hash ID |
+| `qi list` | List all named collections |
+| `qi delete <collection>` | Delete a named collection and all its indexed data |
 | `qi stats` | Show index statistics |
 | `qi doctor` | Health check |
 | `qi version` | Print version |
