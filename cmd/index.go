@@ -22,7 +22,6 @@ var indexCmd = &cobra.Command{
 With no arguments, indexes the current directory (auto-named from path).
 With a path argument (absolute, relative, or starting with ~), indexes that directory (auto-named from path).
 With a collection name, indexes the named collection from config.
-With no arguments and no path-like arg, indexes all configured collections.
 
 A collection name is derived automatically from the directory path on first run:
   /Users/alice/Projects/tools/qi → Projects-tools-qi
@@ -109,6 +108,9 @@ func init() {
 // registered in config (matched by path), or generates a slug name, saves it
 // to config, and returns the new collection.
 func autoCollection(a *app.App, absPath string) (config.Collection, error) {
+	if _, err := os.Stat(absPath); err != nil {
+		return config.Collection{}, fmt.Errorf("path %q does not exist", absPath)
+	}
 	if existing := findCollectionByPath(a.Config.Collections, absPath); existing != nil {
 		return *existing, nil
 	}
