@@ -53,7 +53,6 @@ qi is available as a Claude Code plugin. Add the marketplace and install with:
 qi init
 
 # Index current directory
-# And re-index all saved collections at once
 qi index
 
 # Or index a specific path
@@ -153,10 +152,10 @@ providers:
   #   name: openai
   #   model: text-embedding-3-small
   #   dimension: 1536
-  #
+  #   batch_size: 32
   # generation:
   #   name: openai
-  #   model: gpt-4o-mini
+  #   model: gpt-5.4-nano
 ```
 
 ## Document IDs
