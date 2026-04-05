@@ -32,9 +32,13 @@ qi init
 Indexes documents. SHA-256 content hashing means unchanged files are skipped.
 
 ```bash
-qi index                   # indexes current working directory
-qi index ~/notes           # any absolute or relative path
-qi index notes             # named collection from config
+qi index                              # indexes current working directory
+qi index ~/notes                      # any absolute or relative path
+qi index notes                        # named collection from config
+
+# --name saves the directory as a named collection in config, then indexes it
+qi index ~/notes --name notes         # save + index ~/notes as "notes"
+qi index --name notes                 # save + index current directory as "notes"
 ```
 
 ### `qi search <query>`
@@ -76,6 +80,20 @@ Retrieve a document by its 6-character hash prefix (shown in search results).
 
 ```bash
 qi get abc123
+```
+
+### `qi list`
+List all named collections defined in config (name and path).
+
+```bash
+qi list
+```
+
+### `qi delete <collection>`
+Delete a named collection: removes all indexed data from the database and removes the collection entry from config. Irreversible.
+
+```bash
+qi delete notes
 ```
 
 ### `qi stats`
@@ -203,9 +221,15 @@ Search results show locations like `qi://notes/2024/jan.md [Section > Subsection
 **Index and search (no provider needed):**
 ```bash
 qi init
-# edit config to add a collection path
-qi index notes
-qi search "my keyword"
+qi index ~/notes --name notes    # saves and indexes ~/notes as "notes"
+qi search "my keyword" -c notes
+```
+
+**Manage named collections:**
+```bash
+qi list                          # see all configured collections
+qi index ~/projects --name code  # add a new collection
+qi delete old-notes              # remove collection data + config entry
 ```
 
 **Semantic search with Ollama:**
