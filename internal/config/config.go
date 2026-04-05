@@ -149,6 +149,91 @@ func (c *Config) resolveRelativePaths(baseDir string) {
 	}
 }
 
+// AddCollection adds or updates a named collection in the config file at configPath.
+// Existing YAML comments and structure are preserved via yaml.Node round-trip.
+func AddCollection(configPath string, col Collection) error {
+	if configPath == "" {
+		configPath = DefaultConfigPath()
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("reading config: %w", err)
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parsing config: %w", err)
+	}
+	if len(doc.Content) == 0 {
+		return fmt.Errorf("empty config document")
+	}
+	root := doc.Content[0]
+
+	// Find the collections sequence node in the root mapping.
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value != "collections" {
+			continue
+		}
+		seq := root.Content[i+1]
+		// Update existing entry if name matches.
+		for _, item := range seq.Content {
+			for j := 0; j+1 < len(item.Content); j += 2 {
+				if item.Content[j].Value == "name" && item.Content[j+1].Value == col.Name {
+					for k := 0; k+1 < len(item.Content); k += 2 {
+						if item.Content[k].Value == "path" {
+							item.Content[k+1].Value = col.Path
+							return writeConfigNode(configPath, &doc)
+						}
+					}
+					// name found but no path key — append one
+					item.Content = append(item.Content,
+						&yaml.Node{Kind: yaml.ScalarNode, Value: "path"},
+						&yaml.Node{Kind: yaml.ScalarNode, Value: col.Path},
+					)
+					return writeConfigNode(configPath, &doc)
+				}
+			}
+		}
+		// Not found — append new entry.
+		seq.Content = append(seq.Content, collectionToNode(col))
+		return writeConfigNode(configPath, &doc)
+	}
+
+	// No collections key at all — append one.
+	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	seq.Content = append(seq.Content, collectionToNode(col))
+	root.Content = append(root.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: "collections"},
+		seq,
+	)
+	return writeConfigNode(configPath, &doc)
+}
+
+func collectionToNode(col Collection) *yaml.Node {
+	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	add := func(k, v string) {
+		m.Content = append(m.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: k},
+			&yaml.Node{Kind: yaml.ScalarNode, Value: v},
+		)
+	}
+	add("name", col.Name)
+	add("path", col.Path)
+	if col.Description != "" {
+		add("description", col.Description)
+	}
+	return m
+}
+
+func writeConfigNode(configPath string, doc *yaml.Node) error {
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+	return os.WriteFile(configPath, out, 0644)
+}
+
 func (c *Config) validate() error {
 	seen := map[string]bool{}
 	for _, col := range c.Collections {
