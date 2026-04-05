@@ -10,12 +10,13 @@
 
 A local-first knowledge search CLI for macOS and Linux. Index your documents and search them using BM25 full-text search, vector embeddings, and LLM-powered Q&A — all running locally with no external dependencies.
 
+## Install
+
+<!--Not implemented.-->
+
 ## Quickstart
 
 ```sh
-# Install
-go install github.com/itsmostafa/qi@latest
-
 # Initialize config and database
 qi init
 
