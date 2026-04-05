@@ -5,6 +5,7 @@
 *.so
 *.dylib
 goralph
+qi
 
 # Test binary, built with `go test -c`
 *.test
