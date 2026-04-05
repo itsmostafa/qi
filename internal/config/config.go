@@ -20,6 +20,7 @@ type Collection struct {
 type EmbeddingProviderConfig struct {
 	Name      string `yaml:"name"`
 	BaseURL   string `yaml:"base_url"`
+	APIKey    string `yaml:"api_key,omitempty"`
 	Model     string `yaml:"model"`
 	Dimension int    `yaml:"dimension"`
 	BatchSize int    `yaml:"batch_size,omitempty"`
@@ -84,6 +85,7 @@ func Load(path string) (*Config, error) {
 
 	cfg.expandPaths()
 	cfg.resolveRelativePaths(configDir)
+	cfg.applyEnvOverrides()
 
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -108,6 +110,30 @@ func (c *Config) expandPaths() {
 	c.DatabasePath = ExpandHome(c.DatabasePath)
 	for i := range c.Collections {
 		c.Collections[i].Path = ExpandHome(c.Collections[i].Path)
+	}
+}
+
+const openAIBaseURL = "https://api.openai.com"
+
+func (c *Config) applyEnvOverrides() {
+	apiKey := os.Getenv("OPENAI_API_KEY")
+
+	if emb := c.Providers.Embedding; emb != nil && emb.Name == "openai" {
+		if emb.BaseURL == "" {
+			emb.BaseURL = openAIBaseURL
+		}
+		if emb.APIKey == "" {
+			emb.APIKey = apiKey
+		}
+	}
+
+	if gen := c.Providers.Generation; gen != nil && gen.Name == "openai" {
+		if gen.BaseURL == "" {
+			gen.BaseURL = openAIBaseURL
+		}
+		if gen.APIKey == "" {
+			gen.APIKey = apiKey
+		}
 	}
 }
 
