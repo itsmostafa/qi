@@ -24,4 +24,4 @@ qi supports three search modes:
 ## Configuration
 
 The configuration file uses YAML format.
-See `config.example.yaml` for a fully annotated example.
+See `docs/config.example.yaml` for a fully annotated example.

@@ -210,6 +210,46 @@ func AddCollection(configPath string, col Collection) error {
 	return writeConfigNode(configPath, &doc)
 }
 
+// RenameCollection changes the name of an existing collection in the config file
+// at configPath. It performs a single read-modify-write so there is no window
+// where the old entry has been deleted but the new entry has not yet been written.
+func RenameCollection(configPath, oldName, newName string) error {
+	if configPath == "" {
+		configPath = DefaultConfigPath()
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("reading config: %w", err)
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parsing config: %w", err)
+	}
+	if len(doc.Content) == 0 {
+		return fmt.Errorf("empty config document")
+	}
+	root := doc.Content[0]
+
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value != "collections" {
+			continue
+		}
+		seq := root.Content[i+1]
+		for _, item := range seq.Content {
+			for j := 0; j+1 < len(item.Content); j += 2 {
+				if item.Content[j].Value == "name" && item.Content[j+1].Value == oldName {
+					item.Content[j+1].Value = newName
+					return writeConfigNode(configPath, &doc)
+				}
+			}
+		}
+		return fmt.Errorf("collection %q not found in config", oldName)
+	}
+	return fmt.Errorf("collection %q not found in config", oldName)
+}
+
 // RemoveCollection removes a named collection from the config file at configPath.
 // Existing YAML comments and structure are preserved via yaml.Node round-trip.
 // Returns an error if the collection name is not found.
@@ -252,16 +292,32 @@ func RemoveCollection(configPath string, name string) error {
 
 func collectionToNode(col Collection) *yaml.Node {
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	add := func(k, v string) {
+	addStr := func(k, v string) {
 		m.Content = append(m.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: k},
 			&yaml.Node{Kind: yaml.ScalarNode, Value: v},
 		)
 	}
-	add("name", col.Name)
-	add("path", col.Path)
+	addSeq := func(k string, vals []string) {
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, v := range vals {
+			seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: v})
+		}
+		m.Content = append(m.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: k},
+			seq,
+		)
+	}
+	addStr("name", col.Name)
+	addStr("path", col.Path)
 	if col.Description != "" {
-		add("description", col.Description)
+		addStr("description", col.Description)
+	}
+	if len(col.Extensions) > 0 {
+		addSeq("extensions", col.Extensions)
+	}
+	if len(col.Ignore) > 0 {
+		addSeq("ignore", col.Ignore)
 	}
 	return m
 }
