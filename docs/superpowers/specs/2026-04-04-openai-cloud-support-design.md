@@ -45,6 +45,10 @@ Add commented OpenAI examples in `DefaultConfigTemplate` alongside the existing 
 
 Send `Authorization: Bearer <api_key>` when `cfg.APIKey` is non-empty. This mirrors the existing pattern in `generation.go:72-74`. No interface changes.
 
+### README changes (`README.md`)
+
+Add a brief mention in the providers/configuration section that users can optionally use OpenAI's state-of-the-art models (e.g. `gpt-4o`, `text-embedding-3-small`) by setting `name: openai` and exporting `OPENAI_API_KEY`, as an alternative to running local models via Ollama/llama.cpp.
+
 ## Files Changed
 
 | File | Change |
@@ -52,6 +56,7 @@ Send `Authorization: Bearer <api_key>` when `cfg.APIKey` is non-empty. This mirr
 | `internal/config/config.go` | `APIKey` on `EmbeddingProviderConfig`; `applyEnvOverrides()` |
 | `internal/config/defaults.go` | OpenAI examples in config template |
 | `internal/providers/embedding.go` | Auth header when `APIKey` set |
+| `README.md` | Mention optional OpenAI cloud provider support |
 
 ## Out of Scope
 
