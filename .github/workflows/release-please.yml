@@ -32,15 +32,19 @@ jobs:
           - goos: darwin
             goarch: amd64
             binary: qi-darwin-amd64
+            archive: qi-darwin-amd64.tar.gz
           - goos: darwin
             goarch: arm64
             binary: qi-darwin-arm64
+            archive: qi-darwin-arm64.tar.gz
           - goos: linux
             goarch: amd64
             binary: qi-linux-amd64
+            archive: qi-linux-amd64.tar.gz
           - goos: linux
             goarch: arm64
             binary: qi-linux-arm64
+            archive: qi-linux-arm64.tar.gz
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
@@ -58,11 +62,12 @@ jobs:
           LDFLAGS="-X github.com/itsmostafa/qi/internal/version.Version=${VERSION}"
           LDFLAGS="${LDFLAGS} -X github.com/itsmostafa/qi/internal/version.Commit=${COMMIT}"
           LDFLAGS="${LDFLAGS} -X github.com/itsmostafa/qi/internal/version.BuildDate=${BUILD_DATE}"
-          go build -ldflags="${LDFLAGS}" -o ${{ matrix.binary }} .
+          go build -ldflags="${LDFLAGS}" -o qi .
+          tar -czf ${{ matrix.archive }} qi LICENSE
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: ${{ matrix.binary }}
-          path: ${{ matrix.binary }}
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
           retention-days: 1
 
   upload-release-assets:
@@ -79,11 +84,11 @@ jobs:
           TAG="${{ needs.release-please.outputs.tag_name }}"
           cd artifacts
           # Generate checksums
-          find . -type f \( -perm -u=x -o -name "*.exe" \) -exec sha256sum {} \; | sed 's|./[^/]*/||g' > SHA256SUMS.txt
+          find . -name "*.tar.gz" -exec sha256sum {} \; | sed 's|./[^/]*/||g' > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          # Upload binaries
+          # Upload archives
           for dir in */; do
-            for file in "$dir"*; do
+            for file in "$dir"*.tar.gz; do
               [ -f "$file" ] && gh release upload "$TAG" "$file" --clobber --repo ${{ github.repository }}
             done
           done
@@ -99,6 +104,64 @@ jobs:
         run: |
           TAG="${{ needs.release-please.outputs.tag_name }}"
           ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name' --repo ${{ github.repository }})
-          for asset in qi-darwin-amd64 qi-darwin-arm64 qi-linux-amd64 qi-linux-arm64 SHA256SUMS.txt; do
+          for asset in qi-darwin-amd64.tar.gz qi-darwin-arm64.tar.gz qi-linux-amd64.tar.gz qi-linux-arm64.tar.gz SHA256SUMS.txt; do
             echo "$ASSETS" | grep -q "^${asset}$" && echo "✓ $asset" || { echo "✗ Missing: $asset"; exit 1; }
           done
+
+  update-homebrew-tap:
+    needs: [release-please, upload-release-assets]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download SHA256SUMS from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          gh release download "$TAG" --pattern "SHA256SUMS.txt" --repo ${{ github.repository }}
+
+      - name: Extract SHA256 values
+        id: sha256
+        run: |
+          DARWIN_AMD64=$(grep "qi-darwin-amd64.tar.gz" SHA256SUMS.txt | awk '{print $1}')
+          DARWIN_ARM64=$(grep "qi-darwin-arm64.tar.gz" SHA256SUMS.txt | awk '{print $1}')
+          LINUX_AMD64=$(grep  "qi-linux-amd64.tar.gz"  SHA256SUMS.txt | awk '{print $1}')
+          LINUX_ARM64=$(grep  "qi-linux-arm64.tar.gz"  SHA256SUMS.txt | awk '{print $1}')
+          echo "darwin_amd64=${DARWIN_AMD64}" >> "$GITHUB_OUTPUT"
+          echo "darwin_arm64=${DARWIN_ARM64}" >> "$GITHUB_OUTPUT"
+          echo "linux_amd64=${LINUX_AMD64}"   >> "$GITHUB_OUTPUT"
+          echo "linux_arm64=${LINUX_ARM64}"   >> "$GITHUB_OUTPUT"
+
+      - name: Checkout homebrew-qi tap
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: itsmostafa/homebrew-qi
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-qi
+
+      - name: Update formula
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          VERSION="${TAG#qi-v}"
+          FORMULA="homebrew-qi/Formula/qi.rb"
+
+          sed -i "s/^  version \".*\"/  version \"${VERSION}\"/" "$FORMULA"
+
+          # Match URL line, advance to next line (sha256), replace hash
+          sed -i "/qi-darwin-arm64\.tar\.gz/{n; s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.darwin_arm64 }}\"/;}" "$FORMULA"
+          sed -i "/qi-darwin-amd64\.tar\.gz/{n; s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.darwin_amd64 }}\"/;}" "$FORMULA"
+          sed -i "/qi-linux-arm64\.tar\.gz/{n;  s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.linux_arm64 }}\"/;}"  "$FORMULA"
+          sed -i "/qi-linux-amd64\.tar\.gz/{n;  s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.linux_amd64 }}\"/;}"  "$FORMULA"
+
+          cat "$FORMULA"
+
+      - name: Commit and push
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          VERSION="${TAG#qi-v}"
+          cd homebrew-qi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/qi.rb
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "chore: update qi formula to ${VERSION}"
+          git push
