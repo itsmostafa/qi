@@ -51,11 +51,19 @@ Use --name to choose a custom collection name instead:
 			if _, err := os.Stat(dir); err != nil {
 				return fmt.Errorf("path %q does not exist", dir)
 			}
-			col := config.Collection{Name: indexName, Path: dir}
 			cfgPath := cfgFile
 			if cfgPath == "" {
 				cfgPath = config.DefaultConfigPath()
 			}
+			// If the path is already registered under a different name, rename it
+			// instead of creating a duplicate entry.
+			if existing := findCollectionByPath(a.Config.Collections, dir); existing != nil && existing.Name != indexName {
+				if err := config.RemoveCollection(cfgPath, existing.Name); err != nil {
+					return fmt.Errorf("removing old collection %q: %w", existing.Name, err)
+				}
+				fmt.Printf("Renamed collection %q → %q\n", existing.Name, indexName)
+			}
+			col := config.Collection{Name: indexName, Path: dir}
 			if err := config.AddCollection(cfgPath, col); err != nil {
 				return fmt.Errorf("saving collection to config: %w", err)
 			}
