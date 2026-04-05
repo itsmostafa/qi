@@ -57,11 +57,22 @@ providers:
   #   dimension: 768
   #   batch_size: 32
 
-  # Uncomment to enable LLM generation
+  # Or use OpenAI embeddings — set OPENAI_API_KEY in your environment
+  # embedding:
+  #   name: openai
+  #   model: text-embedding-3-small
+  #   dimension: 1536
+
+  # Uncomment to enable LLM generation (llama.cpp / Ollama compatible)
   # generation:
   #   name: ollama
   #   base_url: http://localhost:11434
   #   model: llama3.2
+
+  # Or use OpenAI generation — set OPENAI_API_KEY in your environment
+  # generation:
+  #   name: openai
+  #   model: gpt-4o-mini
 
 search:
   default_mode: hybrid   # lexical | hybrid | deep

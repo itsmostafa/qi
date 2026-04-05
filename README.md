@@ -8,12 +8,12 @@
   <img src="assets/img/qi-logo.png" alt="qi logo" width="200" />
 </p>
 
-A local-first knowledge search CLI for macOS and Linux. Index your documents and search them using BM25 full-text search, vector embeddings, and LLM-powered Q&A — all running locally with no external dependencies.
+A local-first knowledge search CLI for macOS and Linux. Index your documents and search them using BM25 full-text search, vector embeddings, and LLM-powered Q&A — running locally via Ollama/llama.cpp or using OpenAI's cloud models.
 
 ## Features
 
 - **Blazing-fast full-text search** — BM25 via SQLite FTS5, no external search engine required
-- **Vector search that stays local** — embeddings stored and queried entirely on your machine; works with Ollama, LM Studio, llama.cpp, MLX or any OpenAI-compatible provider
+- **Flexible vector search** — embeddings stored and queried on your machine; works with Ollama, LM Studio, llama.cpp, or OpenAI's cloud (`text-embedding-3-small`, etc.)
 - **Hybrid search with RRF fusion** — combines BM25 and vector rankings for results that are both precise and semantically aware
 - **LLM-powered Q&A with citations** — ask questions in plain English and get grounded answers pointing back to your actual documents
 - **Smart chunking** — breakpoint scoring prioritizes headings, code fences, and paragraph boundaries so chunks stay meaningful, not arbitrary
@@ -115,14 +115,27 @@ collections:
     extensions: [.md, .txt]
 
 providers:
+  # Local (Ollama / llama.cpp)
   embedding:
-    base_url: http://localhost:11434  # Ollama
+    name: ollama
+    base_url: http://localhost:11434
     model: nomic-embed-text
     dimension: 768
 
   generation:
+    name: ollama
     base_url: http://localhost:11434
     model: llama3.2
+
+  # Or: OpenAI cloud (set OPENAI_API_KEY in your environment)
+  # embedding:
+  #   name: openai
+  #   model: text-embedding-3-small
+  #   dimension: 1536
+  #
+  # generation:
+  #   name: openai
+  #   model: gpt-4o-mini
 ```
 
 ## Document IDs
