@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -229,5 +230,53 @@ func TestExpandHome(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("ExpandHome(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
+	}
+}
+
+func TestSlugFromPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "nested path under home",
+			input:    filepath.Join(home, "Projects", "tools", "qi"),
+			expected: "Projects-tools-qi",
+		},
+		{
+			name:     "single dir under home",
+			input:    filepath.Join(home, "notes"),
+			expected: "notes",
+		},
+		{
+			name:     "path equals home",
+			input:    home,
+			expected: strings.ReplaceAll(strings.TrimPrefix(home, "/"), "/", "-"),
+		},
+		{
+			name:     "path not under home",
+			input:    "/tmp/scratch",
+			expected: "tmp-scratch",
+		},
+		{
+			name:     "root-level path not under home",
+			input:    "/var/log",
+			expected: "var-log",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SlugFromPath(tt.input)
+			if got != tt.expected {
+				t.Errorf("SlugFromPath(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
 	}
 }
