@@ -1,4 +1,4 @@
-# qi - query search engine cli for ai agents and humans
+# qi - query engine cli for ai agents and humans
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude](https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=fff)](https://claude.ai/code)
@@ -8,7 +8,8 @@
   <img src="assets/img/qi-logo.png" alt="qi logo" width="200" />
 </p>
 
-A local-first knowledge search CLI for macOS and Linux. Index your documents and search them using BM25 full-text search, vector embeddings, and LLM-powered Q&A — running locally via Ollama/llama.cpp or using OpenAI's cloud models.
+A local-first knowledge search CLI for macOS and Linux. Index your documents and search them using BM25 full-text search, vector embeddings, and LLM-powered Q&A.
+Choose your own models via Ollama, LM Studio, llama.cpp, MLX or using OpenAI's cloud models.
 
 ## Features
 
