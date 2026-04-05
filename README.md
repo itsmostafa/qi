@@ -8,7 +8,7 @@
   <img src="assets/img/qi-logo.png" alt="qi logo" width="200" />
 </p>
 
-A local-first knowledge search CLI for macOS. Index your documents and search them using BM25 full-text search, vector embeddings, and LLM-powered Q&A — all running locally with no external dependencies.
+A local-first knowledge search CLI for macOS and Linux. Index your documents and search them using BM25 full-text search, vector embeddings, and LLM-powered Q&A — all running locally with no external dependencies.
 
 ## Quickstart
 
@@ -42,29 +42,6 @@ qi ask "how does X work?"
 qi doctor
 ```
 
-## Configuration
-
-The config lives at `~/.config/qi/config.yaml`. See [`config.example.yaml`](config.example.yaml) for a fully annotated example.
-
-```yaml
-database_path: ~/.local/share/qi/qi.db
-
-collections:
-  - name: notes
-    path: ~/notes
-    extensions: [.md, .txt]
-
-providers:
-  embedding:
-    base_url: http://localhost:11434  # Ollama
-    model: nomic-embed-text
-    dimension: 768
-
-  generation:
-    base_url: http://localhost:11434
-    model: llama3.2
-```
-
 ## Commands
 
 | Command | Description |
@@ -91,6 +68,29 @@ Use `--explain` to see scoring breakdown:
 
 ```sh
 qi query "chunking algorithm" --mode hybrid --explain
+```
+
+## Configuration
+
+The config lives at `~/.config/qi/config.yaml`. See [`config.example.yaml`](config.example.yaml) for a fully annotated example.
+
+```yaml
+database_path: ~/.local/share/qi/qi.db
+
+collections:
+  - name: notes
+    path: ~/notes
+    extensions: [.md, .txt]
+
+providers:
+  embedding:
+    base_url: http://localhost:11434  # Ollama
+    model: nomic-embed-text
+    dimension: 768
+
+  generation:
+    base_url: http://localhost:11434
+    model: llama3.2
 ```
 
 ## Architecture
