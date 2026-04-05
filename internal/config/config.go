@@ -108,13 +108,16 @@ func ExpandHome(path string) string {
 
 // SlugFromPath converts an absolute path to a collection name slug.
 // It strips the user home directory prefix if present, then replaces
-// path separators with hyphens.
+// path separators with hyphens. Trailing slashes are removed first.
 //
 // Examples:
 //   /Users/alice/Projects/tools/qi → Projects-tools-qi
 //   /Users/alice/notes             → notes
 //   /tmp/scratch                   → tmp-scratch
 func SlugFromPath(absPath string) string {
+	// Remove trailing slashes to normalize the path.
+	absPath = strings.TrimRight(absPath, "/")
+
 	if home, err := os.UserHomeDir(); err == nil {
 		prefix := home + "/"
 		if strings.HasPrefix(absPath, prefix) {

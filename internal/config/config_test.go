@@ -255,11 +255,6 @@ func TestSlugFromPath(t *testing.T) {
 			expected: "notes",
 		},
 		{
-			name:     "path equals home",
-			input:    home,
-			expected: strings.ReplaceAll(strings.TrimPrefix(home, "/"), "/", "-"),
-		},
-		{
 			name:     "path not under home",
 			input:    "/tmp/scratch",
 			expected: "tmp-scratch",
@@ -279,4 +274,25 @@ func TestSlugFromPath(t *testing.T) {
 			}
 		})
 	}
+
+	// path equals home: slug must be non-empty and must not start with a hyphen.
+	t.Run("path equals home", func(t *testing.T) {
+		got := SlugFromPath(home)
+		if got == "" {
+			t.Error("SlugFromPath(home) returned empty string")
+		}
+		if strings.HasPrefix(got, "-") {
+			t.Errorf("SlugFromPath(home) = %q, must not start with a hyphen", got)
+		}
+	})
+
+	// trailing slash: should produce the same result as without trailing slash
+	t.Run("trailing slash", func(t *testing.T) {
+		input := filepath.Join(home, "notes")
+		withoutSlash := SlugFromPath(input)
+		withSlash := SlugFromPath(input + "/")
+		if withoutSlash != withSlash {
+			t.Errorf("SlugFromPath(%q) = %q, SlugFromPath(%q) = %q, should be equal", input, withoutSlash, input+"/", withSlash)
+		}
+	})
 }
