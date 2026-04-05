@@ -3,7 +3,23 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
+
+var nonAlphanumRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+// SlugFromPath returns a URL-safe slug derived from the last component of path.
+func SlugFromPath(path string) string {
+	base := filepath.Base(path)
+	slug := strings.ToLower(base)
+	slug = nonAlphanumRe.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		slug = "collection"
+	}
+	return slug
+}
 
 func DefaultConfigPath() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
