@@ -1,32 +1,42 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 
-	"github.com/itsmostafa/goralph/internal/version"
 	"github.com/spf13/cobra"
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "goralph",
-	Short: "Ralph Wiggum agentic loop for Claude Code",
-	Long: `Go Ralph is an implementation of the Ralph Wiggum Technique - an agentic loop
-pattern that runs Claude Code iteratively with automatic git pushes between iterations.
+var (
+	cfgFile string
+	verbose bool
+	format  string
+)
 
-Reference: https://github.com/ghuntley/how-to-ralph-wiggum`,
+var rootCmd = &cobra.Command{
+	Use:          "qi",
+	Short:        "Local-first knowledge search",
+	Long:         `qi indexes your local documents and lets you search, query, and ask questions using BM25 and vector search.`,
+	SilenceUsage: true,
+}
+
+func Execute() {
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }
 
 func init() {
-	rootCmd.Version = version.Version
-	rootCmd.SetVersionTemplate(fmt.Sprintf("goralph %s\n", version.String()))
-	rootCmd.CompletionOptions.DisableDefaultCmd = true
-}
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/qi/config.yaml)")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	rootCmd.PersistentFlags().StringVarP(&format, "format", "f", "text", "output format: text, json, markdown")
 
-// Execute runs the root command
-func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(indexCmd)
+	rootCmd.AddCommand(searchCmd)
+	rootCmd.AddCommand(queryCmd)
+	rootCmd.AddCommand(askCmd)
+	rootCmd.AddCommand(getCmd)
+	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(statsCmd)
 }

@@ -31,19 +31,16 @@ jobs:
         include:
           - goos: darwin
             goarch: amd64
-            binary: goralph-darwin-amd64
+            binary: qi-darwin-amd64
           - goos: darwin
             goarch: arm64
-            binary: goralph-darwin-arm64
-          - goos: windows
-            goarch: amd64
-            binary: goralph-windows-amd64.exe
+            binary: qi-darwin-arm64
           - goos: linux
             goarch: amd64
-            binary: goralph-linux-amd64
+            binary: qi-linux-amd64
           - goos: linux
             goarch: arm64
-            binary: goralph-linux-arm64
+            binary: qi-linux-arm64
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
@@ -58,9 +55,9 @@ jobs:
           VERSION="${{ needs.release-please.outputs.tag_name }}"
           COMMIT="${GITHUB_SHA::7}"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          LDFLAGS="-X github.com/itsmostafa/goralph/internal/version.Version=${VERSION}"
-          LDFLAGS="${LDFLAGS} -X github.com/itsmostafa/goralph/internal/version.Commit=${COMMIT}"
-          LDFLAGS="${LDFLAGS} -X github.com/itsmostafa/goralph/internal/version.BuildDate=${BUILD_DATE}"
+          LDFLAGS="-X github.com/itsmostafa/qi/internal/version.Version=${VERSION}"
+          LDFLAGS="${LDFLAGS} -X github.com/itsmostafa/qi/internal/version.Commit=${COMMIT}"
+          LDFLAGS="${LDFLAGS} -X github.com/itsmostafa/qi/internal/version.BuildDate=${BUILD_DATE}"
           go build -ldflags="${LDFLAGS}" -o ${{ matrix.binary }} .
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -102,6 +99,6 @@ jobs:
         run: |
           TAG="${{ needs.release-please.outputs.tag_name }}"
           ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name' --repo ${{ github.repository }})
-          for asset in goralph-darwin-amd64 goralph-darwin-arm64 goralph-windows-amd64.exe goralph-linux-amd64 goralph-linux-arm64 SHA256SUMS.txt; do
+          for asset in qi-darwin-amd64 qi-darwin-arm64 qi-linux-amd64 qi-linux-arm64 SHA256SUMS.txt; do
             echo "$ASSETS" | grep -q "^${asset}$" && echo "✓ $asset" || { echo "✗ Missing: $asset"; exit 1; }
           done
