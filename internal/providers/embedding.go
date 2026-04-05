@@ -81,6 +81,9 @@ func (p *embeddingProvider) embedBatch(ctx context.Context, texts []string) ([][
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if p.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.cfg.APIKey)
+	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {
