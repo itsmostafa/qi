@@ -1,12 +1,12 @@
-# qi
-
-<p align="center">
-  <img src="assets/img/qi-logo.png" alt="qi logo" width="200" />
-</p>
+# qi - query search engine for ai agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude](https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=fff)](https://claude.ai/code)
 [![Releases](https://img.shields.io/github/v/release/itsmostafa/qi)](https://github.com/itsmostafa/qi/releases)
+
+<p align="center">
+  <img src="assets/img/qi-logo.png" alt="qi logo" width="200" />
+</p>
 
 A local-first knowledge search CLI for macOS. Index your documents and search them using BM25 full-text search, vector embeddings, and LLM-powered Q&A — all running locally with no external dependencies.
 
