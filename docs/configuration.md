@@ -99,6 +99,17 @@ embedding:
   dimension: 768            # match the model you loaded
 ```
 
+_LM Studio_ (local, free):
+```yaml
+embedding:
+  name: lmstudio
+  base_url: http://localhost:1234
+  model: nomic-ai/nomic-embed-text-v1.5-GGUF   # must match model loaded in LM Studio
+  dimension: 768                                 # match the model you loaded
+```
+
+Load an embedding model in LM Studio (Models → Search → load), then start the local server (Local Server tab). The model field must match the identifier shown in LM Studio exactly.
+
 _OpenAI_ (cloud, requires API key):
 ```yaml
 embedding:
@@ -181,6 +192,16 @@ generation:
   base_url: http://localhost:8080
   model: llama3.2   # informational only
 ```
+
+_LM Studio_ (local, free):
+```yaml
+generation:
+  name: lmstudio
+  base_url: http://localhost:1234
+  model: google/gemma-4-26b-a4b   # must match model loaded in LM Studio
+```
+
+Load a chat model in LM Studio and start the local server (Local Server tab). The model field must match the identifier shown in LM Studio exactly.
 
 _OpenAI_ (cloud, requires API key):
 ```yaml
