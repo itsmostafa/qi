@@ -214,6 +214,51 @@ providers:
 	}
 }
 
+func TestRenameCollection(t *testing.T) {
+	path := writeTempConfig(t, `
+collections:
+  - name: old-name
+    path: /tmp/docs
+  - name: other
+    path: /tmp/other
+`)
+	if err := RenameCollection(path, "old-name", "new-name"); err != nil {
+		t.Fatalf("RenameCollection failed: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after rename failed: %v", err)
+	}
+	names := make([]string, len(cfg.Collections))
+	for i, c := range cfg.Collections {
+		names[i] = c.Name
+	}
+	for _, c := range cfg.Collections {
+		if c.Name == "old-name" {
+			t.Errorf("old name still present after rename")
+		}
+		if c.Name == "new-name" && c.Path != "/tmp/docs" {
+			t.Errorf("path changed after rename: got %q", c.Path)
+		}
+	}
+	if len(cfg.Collections) != 2 {
+		t.Errorf("expected 2 collections after rename, got %d: %v", len(cfg.Collections), names)
+	}
+}
+
+func TestRenameCollection_NotFound(t *testing.T) {
+	path := writeTempConfig(t, `
+collections:
+  - name: docs
+    path: /tmp
+`)
+	err := RenameCollection(path, "nonexistent", "new-name")
+	if err == nil {
+		t.Error("expected error renaming nonexistent collection")
+	}
+}
+
 func TestExpandHome(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	tests := []struct {

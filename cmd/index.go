@@ -58,8 +58,8 @@ Use --name to choose a custom collection name instead:
 			// If the path is already registered under a different name, rename it
 			// instead of creating a duplicate entry.
 			if existing := findCollectionByPath(a.Config.Collections, dir); existing != nil && existing.Name != indexName {
-				if err := config.RemoveCollection(cfgPath, existing.Name); err != nil {
-					return fmt.Errorf("removing old collection %q: %w", existing.Name, err)
+				if err := config.RenameCollection(cfgPath, existing.Name, indexName); err != nil {
+					return fmt.Errorf("renaming collection %q → %q: %w", existing.Name, indexName, err)
 				}
 				fmt.Printf("Renamed collection %q → %q\n", existing.Name, indexName)
 			}
