@@ -12,6 +12,7 @@ tasks:
     desc: Build the qi binary
     sources:
       - "**/*.go"
+      - "internal/db/migrations/*.sql"
       - go.mod
       - go.sum
     generates:
