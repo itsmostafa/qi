@@ -24,6 +24,7 @@ Always run `task check` before finishing any code change to ensure all checks pa
 - **Break-point chunker**: Scores chunk boundaries by type (heading=100, code fence=80, blank line=20) with distance decay from target size.
 - **Graceful degradation**: Vector search and generation are optional — BM25 always works.
 - **Config**: Raw `gopkg.in/yaml.v3`, no viper. `~` expansion + relative path resolution.
+- **Auto-named collections**: `qi index` and `qi index <path>` automatically generate a collection name from the directory path (stripping home prefix, replacing `/` with `-`). The name is saved to config on first run. Subsequent runs match by path so the same directory is never indexed under two names. `--name` overrides this for custom names.
 
 ## Package Structure
 

@@ -52,16 +52,16 @@ qi is available as a Claude Code plugin. Add the marketplace and install with:
 # Initialize config and database
 qi init
 
-# Index current directory
+# Index current directory (auto-named from path)
 qi index
 
-# Or index a specific path
+# Or index a specific path (also auto-named)
 qi index ~/notes
 
-# Save a directory as a named collection
+# Use --name to choose a custom collection name
 qi index ~/notes --name notes
 
-# Re-index it later by name
+# Re-index a named collection
 qi index notes
 
 # Search
@@ -124,7 +124,7 @@ qi query "chunking algorithm" --mode hybrid --explain
 
 ## Configuration
 
-The config lives at `~/.config/qi/config.yaml`. See [`config.example.yaml`](config.example.yaml) for a fully annotated example.
+The config lives at `~/.config/qi/config.yaml`. See the [configuration guide](docs/configuration.md) for a full reference and provider setup recipes, or browse the [annotated example](docs/config.example.yaml).
 
 ```yaml
 database_path: ~/.local/share/qi/qi.db

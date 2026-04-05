@@ -36,7 +36,12 @@ qi index                              # indexes current working directory
 qi index ~/notes                      # any absolute or relative path
 qi index notes                        # named collection from config
 
-# --name saves the directory as a named collection in config, then indexes it
+# directories are auto-named from their path on first run:
+# ~/Projects/tools/qi → "Projects-tools-qi"
+qi index                              # indexes and auto-names current directory
+qi index ~/notes                      # indexes and auto-names ~/notes
+
+# --name overrides the auto-generated name with a custom one
 qi index ~/notes --name notes         # save + index ~/notes as "notes"
 qi index --name notes                 # save + index current directory as "notes"
 ```
@@ -221,15 +226,15 @@ Search results show locations like `qi://notes/2024/jan.md [Section > Subsection
 **Index and search (no provider needed):**
 ```bash
 qi init
-qi index ~/notes --name notes    # saves and indexes ~/notes as "notes"
+qi index ~/notes                 # auto-named "notes" on first run
 qi search "my keyword" -c notes
 ```
 
 **Manage named collections:**
 ```bash
 qi list                          # see all configured collections
-qi index ~/projects --name code  # add a new collection
-qi delete old-notes              # remove collection data + config entry
+qi index ~/projects              # auto-named "projects" on first run
+qi delete projects               # remove collection data + config entry
 ```
 
 **Semantic search with Ollama:**
