@@ -1,6 +1,6 @@
 ---
 name: qi-cli
-description: Guide for using qi, a local-first knowledge search CLI for macOS. Use this skill whenever the user asks about qi commands, indexing documents, searching a knowledge base, asking questions with RAG, configuring providers (Ollama, OpenAI), understanding search modes (BM25, hybrid, vector), or anything related to the qi tool. Triggers on phrases like "qi index", "qi search", "qi ask", "qi query", "how do I use qi", "set up qi", "configure qi", "search my notes with qi", or any mention of the qi CLI.
+description: Guide for using qi, a local knowledge search CLI for macOS and Linux. Use this skill whenever the user asks about qi commands, indexing documents, searching a knowledge base, asking questions with RAG, configuring providers (Ollama, OpenAI), understanding search modes (BM25, hybrid, vector), or anything related to the qi tool. Triggers on phrases like "qi index", "qi search", "qi ask", "qi query", "how do I use qi", "set up qi", "configure qi", "search my notes with qi", or any mention of the qi CLI.
 ---
 
 qi is a local-first knowledge search CLI. It indexes documents into SQLite and supports BM25 full-text search, vector/hybrid search (with a local or remote embedding provider), and LLM-powered Q&A with citations.
