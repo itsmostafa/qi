@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -24,6 +26,15 @@ var updateCmd = &cobra.Command{
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("finding current executable: %w", err)
+	}
+	if isHomebrewInstall(exe) {
+		fmt.Println("qi was installed via Homebrew. Update with: brew upgrade qi")
+		return nil
+	}
+
 	release, err := fetchLatestRelease()
 	if err != nil {
 		return fmt.Errorf("fetching latest release: %w", err)
@@ -37,24 +48,24 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Updating %s → %s\n", current, latest)
 
-	assetName := fmt.Sprintf("qi-%s-%s", runtime.GOOS, runtime.GOARCH)
-	binaryURL, err := findAssetURL(release.Assets, assetName)
+	archiveName := fmt.Sprintf("qi-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	archiveURL, err := findAssetURL(release.Assets, archiveName)
 	if err != nil {
-		return fmt.Errorf("finding asset %q: %w", assetName, err)
+		return fmt.Errorf("finding asset %q: %w", archiveName, err)
 	}
 	sumsURL, err := findAssetURL(release.Assets, "SHA256SUMS.txt")
 	if err != nil {
 		return fmt.Errorf("finding SHA256SUMS.txt: %w", err)
 	}
 
-	expectedHash, err := fetchExpectedChecksum(sumsURL, assetName)
+	expectedHash, err := fetchExpectedChecksum(sumsURL, archiveName)
 	if err != nil {
 		return fmt.Errorf("fetching checksums: %w", err)
 	}
 
-	tmp, err := downloadToTemp(binaryURL)
+	tmp, err := downloadToTemp(archiveURL)
 	if err != nil {
-		return fmt.Errorf("downloading binary: %w", err)
+		return fmt.Errorf("downloading archive: %w", err)
 	}
 	defer os.Remove(tmp)
 
@@ -62,16 +73,27 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	exe, err := os.Executable()
+	extracted, err := extractBinaryFromTar(tmp, "qi")
 	if err != nil {
-		return fmt.Errorf("finding current executable: %w", err)
+		return fmt.Errorf("extracting binary: %w", err)
 	}
-	if err := replaceExecutable(exe, tmp); err != nil {
+	defer os.Remove(extracted)
+
+	if err := replaceExecutable(exe, extracted); err != nil {
 		return fmt.Errorf("replacing executable: %w", err)
 	}
 
 	fmt.Printf("Updated to %s. Run `qi version` to confirm.\n", latest)
 	return nil
+}
+
+func isHomebrewInstall(path string) bool {
+	for _, prefix := range []string{"/opt/homebrew/", "/usr/local/Cellar/", "/usr/local/opt/", "/home/linuxbrew/"} {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 type githubRelease struct {
@@ -162,6 +184,44 @@ func verifyChecksum(path, expected string) error {
 		return fmt.Errorf("checksum mismatch: got %s, want %s", got, expected)
 	}
 	return nil
+}
+
+func extractBinaryFromTar(archivePath, binaryName string) (string, error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	gr, err := gzip.NewReader(f)
+	if err != nil {
+		return "", err
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if hdr.Name != binaryName {
+			continue
+		}
+		out, err := os.CreateTemp("", "qi-update-bin-*")
+		if err != nil {
+			return "", err
+		}
+		if _, err := io.Copy(out, tr); err != nil {
+			out.Close()
+			os.Remove(out.Name())
+			return "", err
+		}
+		out.Close()
+		return out.Name(), nil
+	}
+	return "", fmt.Errorf("binary %q not found in archive", binaryName)
 }
 
 func replaceExecutable(dest, src string) error {
