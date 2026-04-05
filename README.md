@@ -13,7 +13,7 @@ A local-first knowledge search CLI for macOS and Linux. Index your documents and
 ## Features
 
 - **Blazing-fast full-text search** — BM25 via SQLite FTS5, no external search engine required
-- **Flexible vector search** — embeddings stored and queried on your machine; works with Ollama, LM Studio, llama.cpp, or OpenAI's cloud (`text-embedding-3-small`, etc.)
+- **Flexible vector search** — embeddings stored and queried on your machine; works with Ollama, LM Studio, llama.cpp, or OpenAI's SOTA models.
 - **Hybrid search with RRF fusion** — combines BM25 and vector rankings for results that are both precise and semantically aware
 - **LLM-powered Q&A with citations** — ask questions in plain English and get grounded answers pointing back to your actual documents
 - **Smart chunking** — breakpoint scoring prioritizes headings, code fences, and paragraph boundaries so chunks stay meaningful, not arbitrary
@@ -57,15 +57,26 @@ qi index
 # Or index a specific path
 qi index ~/notes
 
-# Or index a named collection from config
-$EDITOR ~/.config/qi/config.yaml  # Configure collections
+# Save a directory as a named collection
+qi index ~/notes --name notes
+
+# Re-index it later by name
 qi index notes
+
+# Re-index all saved collections at once
+qi index
 
 # Search
 qi search "my query"
 
+# Search a specific collection
+qi search "my query" -c notes
+
 # Hybrid search (BM25 + vector, requires embedding provider)
 qi query "my query" --mode hybrid
+
+# Hybrid search a specific collection
+qi query "my query" --mode hybrid -c notes
 
 # Ask a question (requires generation provider)
 qi ask "how does X work?"
