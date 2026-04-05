@@ -12,6 +12,10 @@ go test ./...       # Run all tests
 go vet ./...        # Lint
 ```
 
+## Checks
+
+Always run `task check` before finishing any code change to ensure all checks pass (build, tests, vet).
+
 ## Key Design Decisions
 
 - **CGo-free SQLite**: `github.com/ncruces/go-sqlite3` (wasm2go transpiled, no CGo needed)
