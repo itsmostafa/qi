@@ -19,6 +19,20 @@ import (
 	"github.com/itsmostafa/qi/internal/parser"
 )
 
+// defaultIgnoreDirs are skipped unconditionally (common VCS/tool/build directories).
+var defaultIgnoreDirs = map[string]bool{
+	".git": true, ".hg": true, ".svn": true,
+	".venv": true, "venv": true, ".env": true,
+	"node_modules": true,
+	"vendor": true,
+	".tox": true, ".mypy_cache": true, ".pytest_cache": true, "__pycache__": true,
+	".ruff_cache": true, ".hypothesis": true,
+	"target": true,        // Rust/Java/Maven
+	"dist": true, "build": true, "out": true,
+	".gradle": true, ".idea": true, ".vscode": true,
+	".DS_Store": true,
+}
+
 // defaultExtensions are indexed when a collection doesn't specify extensions.
 var defaultExtensions = map[string]bool{
 	".md": true, ".markdown": true,
@@ -81,7 +95,7 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 			return err
 		}
 		if d.IsDir() {
-			if ignoreSet[d.Name()] {
+			if defaultIgnoreDirs[d.Name()] || ignoreSet[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
