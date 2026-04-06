@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.1](https://github.com/itsmostafa/qi/compare/v0.5.0...v0.5.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* **indexer:** skip common VCS/tool/build dirs by default ([be089b0](https://github.com/itsmostafa/qi/commit/be089b0d07870dad101e703f2e461c90eee3a5f2))
+* **indexer:** skip common VCS/tool/build dirs by default ([3d1a649](https://github.com/itsmostafa/qi/commit/3d1a649d25feca37b2b442a2b00466c29d0f93bd))
+* **marketplace:** use ./ instead of . for plugin source path ([d765c04](https://github.com/itsmostafa/qi/commit/d765c04ff684fc7266294de36d2f9dd002debf50))
+* **marketplace:** use ./ instead of . for plugin source path ([e826a16](https://github.com/itsmostafa/qi/commit/e826a16338afd8baa084374ca6895795f875278d))
+
 ## [0.5.0](https://github.com/itsmostafa/qi/compare/v0.4.0...v0.5.0) (2026-04-05)
 
 
