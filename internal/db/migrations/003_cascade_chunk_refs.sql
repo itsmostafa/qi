@@ -19,11 +19,13 @@ CREATE TABLE embeddings_new (
     chunk_id    INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
     provider    TEXT NOT NULL,
     model       TEXT NOT NULL,
-    dimension   INTEGER NOT NULL,
+    dimension   INTEGER NOT NULL DEFAULT 0,
     embedded_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-INSERT INTO embeddings_new(chunk_id, provider, model, dimension, embedded_at)
-    SELECT chunk_id, provider, model, dimension, embedded_at FROM embeddings;
+-- Omit dimension: older DBs may not have it (002 used CREATE TABLE IF NOT EXISTS,
+-- which was a no-op when the table already existed without that column).
+INSERT INTO embeddings_new(chunk_id, provider, model, embedded_at)
+    SELECT chunk_id, provider, model, embedded_at FROM embeddings;
 DROP TABLE embeddings;
 ALTER TABLE embeddings_new RENAME TO embeddings;
 
