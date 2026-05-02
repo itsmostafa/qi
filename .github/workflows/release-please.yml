@@ -108,60 +108,37 @@ jobs:
             echo "$ASSETS" | grep -q "^${asset}$" && echo "✓ $asset" || { echo "✗ Missing: $asset"; exit 1; }
           done
 
-  update-homebrew-tap:
+  update-homebrew-formula:
     needs: [release-please, upload-release-assets]
     runs-on: ubuntu-latest
     steps:
-      - name: Download SHA256SUMS from release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ needs.release-please.outputs.tag_name }}"
-          gh release download "$TAG" --pattern "SHA256SUMS.txt" --repo ${{ github.repository }}
-
-      - name: Extract SHA256 values
-        id: sha256
-        run: |
-          DARWIN_AMD64=$(grep "qi-darwin-amd64.tar.gz" SHA256SUMS.txt | awk '{print $1}')
-          DARWIN_ARM64=$(grep "qi-darwin-arm64.tar.gz" SHA256SUMS.txt | awk '{print $1}')
-          LINUX_AMD64=$(grep  "qi-linux-amd64.tar.gz"  SHA256SUMS.txt | awk '{print $1}')
-          LINUX_ARM64=$(grep  "qi-linux-arm64.tar.gz"  SHA256SUMS.txt | awk '{print $1}')
-          echo "darwin_amd64=${DARWIN_AMD64}" >> "$GITHUB_OUTPUT"
-          echo "darwin_arm64=${DARWIN_ARM64}" >> "$GITHUB_OUTPUT"
-          echo "linux_amd64=${LINUX_AMD64}"   >> "$GITHUB_OUTPUT"
-          echo "linux_arm64=${LINUX_ARM64}"   >> "$GITHUB_OUTPUT"
-
-      - name: Checkout homebrew-qi tap
+      - name: Checkout qi repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
-          repository: itsmostafa/homebrew-qi
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: homebrew-qi
+          token: ${{ github.token }}
+
+      - name: Compute source tarball SHA256
+        id: sha256
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          SHA256=$(curl -sL "https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz" | sha256sum | awk '{print $1}')
+          echo "source=${SHA256}" >> "$GITHUB_OUTPUT"
 
       - name: Update formula
         run: |
           TAG="${{ needs.release-please.outputs.tag_name }}"
-          VERSION="${TAG#v}"
-          FORMULA="homebrew-qi/Formula/qi.rb"
-
-          sed -i "s/^  version \".*\"/  version \"${VERSION}\"/" "$FORMULA"
-
-          # Match URL line, advance to next line (sha256), replace hash
-          sed -i "/qi-darwin-arm64\.tar\.gz/{n; s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.darwin_arm64 }}\"/;}" "$FORMULA"
-          sed -i "/qi-darwin-amd64\.tar\.gz/{n; s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.darwin_amd64 }}\"/;}" "$FORMULA"
-          sed -i "/qi-linux-arm64\.tar\.gz/{n;  s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.linux_arm64 }}\"/;}"  "$FORMULA"
-          sed -i "/qi-linux-amd64\.tar\.gz/{n;  s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.linux_amd64 }}\"/;}"  "$FORMULA"
-
+          FORMULA="HomebrewFormula/qi.rb"
+          sed -i "s|url \".*\"|url \"https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz\"|" "$FORMULA"
+          sed -i "s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.source }}\"/" "$FORMULA"
           cat "$FORMULA"
 
       - name: Commit and push
         run: |
           TAG="${{ needs.release-please.outputs.tag_name }}"
           VERSION="${TAG#v}"
-          cd homebrew-qi
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/qi.rb
+          git add HomebrewFormula/qi.rb
           git diff --cached --quiet && echo "No changes to commit" && exit 0
-          git commit -m "chore: update qi formula to ${VERSION}"
+          git commit -m "chore: update Homebrew formula to ${VERSION}"
           git push
