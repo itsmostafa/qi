@@ -105,7 +105,6 @@ qi doctor
 | `qi delete <collection>` | Delete a named collection and all its indexed data |
 | `qi stats` | Show index statistics |
 | `qi doctor` | Health check |
-| `qi version` | Print version |
 
 ## Search Modes
 
