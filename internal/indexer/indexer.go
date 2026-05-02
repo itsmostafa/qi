@@ -145,15 +145,16 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 
 	hash := sha256sum(data)
 
-	// Check if document exists and unchanged
+	// Check if document exists (active or deactivated) and whether content changed
 	var existingHash string
 	var docID int64
+	var existingActive int
 	row := idx.db.QueryRowContext(ctx,
-		`SELECT id, content_hash FROM documents WHERE collection=? AND path=? AND active=1`,
+		`SELECT id, content_hash, active FROM documents WHERE collection=? AND path=?`,
 		col.Name, relPath)
-	_ = row.Scan(&docID, &existingHash)
+	_ = row.Scan(&docID, &existingHash, &existingActive)
 
-	if existingHash == hash {
+	if existingActive == 1 && existingHash == hash {
 		return nil // unchanged
 	}
 
@@ -198,9 +199,9 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 		newDocID, _ = res.LastInsertId()
 		stats.FilesAdded++
 	} else {
-		// Update
+		// Update (or reactivate a previously deactivated document)
 		_, err = tx.ExecContext(ctx,
-			`UPDATE documents SET title=?, content_hash=?, updated_at=datetime('now') WHERE id=?`,
+			`UPDATE documents SET title=?, content_hash=?, active=1, updated_at=datetime('now') WHERE id=?`,
 			title, hash, docID)
 		if err != nil {
 			return fmt.Errorf("updating document: %w", err)
@@ -210,7 +211,11 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 		if _, err := tx.ExecContext(ctx, `DELETE FROM chunks WHERE doc_id=?`, docID); err != nil {
 			return fmt.Errorf("deleting old chunks: %w", err)
 		}
-		stats.FilesUpdated++
+		if existingActive == 0 {
+			stats.FilesAdded++
+		} else {
+			stats.FilesUpdated++
+		}
 	}
 
 	// Insert chunks
