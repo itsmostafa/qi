@@ -103,6 +103,71 @@ func TestIndexer_IncrementalUpdate(t *testing.T) {
 	}
 }
 
+func TestIndexer_ReindexWithEmbeddings(t *testing.T) {
+	database := openTestDB(t)
+	idx := New(database, 256)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.md")
+	col := config.Collection{Name: "test", Path: dir, Extensions: []string{".md"}}
+
+	if err := os.WriteFile(path, []byte("# Original\nOriginal content."), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := idx.Index(context.Background(), col); err != nil {
+		t.Fatal(err)
+	}
+
+	// Find a chunk for this document and insert a fake embedding.
+	var chunkID int64
+	row := database.QueryRowContext(context.Background(),
+		`SELECT c.id FROM chunks c JOIN documents d ON d.id=c.doc_id
+		 WHERE d.collection='test' AND d.path='doc.md' LIMIT 1`)
+	if err := row.Scan(&chunkID); err != nil {
+		t.Fatalf("finding chunk: %v", err)
+	}
+	if err := database.InsertEmbedding(context.Background(), chunkID, []float32{0.1, 0.2, 0.3, 0.4}); err != nil {
+		t.Fatalf("inserting chunk_vector: %v", err)
+	}
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO embeddings(chunk_id, provider, model, dimension) VALUES (?, 'test', 'test-model', 4)`,
+		chunkID); err != nil {
+		t.Fatalf("inserting embeddings row: %v", err)
+	}
+
+	// Modify the file so its hash changes.
+	if err := os.WriteFile(path, []byte("# Updated\nUpdated content."), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reindex must succeed and report the file as updated.
+	stats, err := idx.Index(context.Background(), col)
+	if err != nil {
+		t.Fatalf("reindex failed: %v", err)
+	}
+	if stats.FilesUpdated != 1 {
+		t.Errorf("expected 1 updated, got %d", stats.FilesUpdated)
+	}
+
+	// No orphaned rows should remain in chunk_vectors or embeddings.
+	var orphanVectors int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM chunk_vectors WHERE chunk_id NOT IN (SELECT id FROM chunks)`).Scan(&orphanVectors); err != nil {
+		t.Fatalf("querying orphan chunk_vectors: %v", err)
+	}
+	if orphanVectors != 0 {
+		t.Errorf("expected 0 orphan chunk_vectors rows, got %d", orphanVectors)
+	}
+
+	var orphanEmbeddings int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM embeddings WHERE chunk_id NOT IN (SELECT id FROM chunks)`).Scan(&orphanEmbeddings); err != nil {
+		t.Fatalf("querying orphan embeddings: %v", err)
+	}
+	if orphanEmbeddings != 0 {
+		t.Errorf("expected 0 orphan embeddings rows, got %d", orphanEmbeddings)
+	}
+}
+
 func TestIndexer_ReindexAfterDeletion(t *testing.T) {
 	database := openTestDB(t)
 	idx := New(database, 256)
