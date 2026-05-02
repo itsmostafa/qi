@@ -95,7 +95,8 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 			return err
 		}
 		if d.IsDir() {
-			if defaultIgnoreDirs[d.Name()] || ignoreSet[d.Name()] {
+			name := d.Name()
+			if defaultIgnoreDirs[name] || ignoreSet[name] || (strings.HasPrefix(name, ".") && name != ".") {
 				return filepath.SkipDir
 			}
 			return nil
