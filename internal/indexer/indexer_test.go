@@ -103,6 +103,68 @@ func TestIndexer_IncrementalUpdate(t *testing.T) {
 	}
 }
 
+func TestIndexer_ReindexAfterDeletion(t *testing.T) {
+	database := openTestDB(t)
+	idx := New(database, 256)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.md")
+	col := config.Collection{Name: "test", Path: dir, Extensions: []string{".md"}}
+
+	// Index the file
+	if err := os.WriteFile(path, []byte("# Original\nOriginal content."), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := idx.Index(context.Background(), col); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the file → deactivates the document
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := idx.Index(context.Background(), col)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.FilesRemoved != 1 {
+		t.Fatalf("expected 1 removed, got %d", stats.FilesRemoved)
+	}
+
+	// Restore the file with new content
+	if err := os.WriteFile(path, []byte("# Restored\nRestored content."), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	stats, err = idx.Index(context.Background(), col)
+	if err != nil {
+		t.Fatalf("index after restore: %v", err)
+	}
+	if stats.FilesAdded != 1 {
+		t.Errorf("expected 1 added after restore, got %d", stats.FilesAdded)
+	}
+
+	// Verify the document is active with new hash and has chunks
+	var active int
+	var hash string
+	row := database.QueryRowContext(context.Background(),
+		`SELECT active, content_hash FROM documents WHERE collection='test' AND path='doc.md'`)
+	if err := row.Scan(&active, &hash); err != nil {
+		t.Fatalf("querying restored document: %v", err)
+	}
+	if active != 1 {
+		t.Errorf("expected active=1, got %d", active)
+	}
+
+	var chunkCount int
+	cRow := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM chunks c JOIN documents d ON d.id=c.doc_id WHERE d.collection='test' AND d.path='doc.md' AND d.active=1`)
+	if err := cRow.Scan(&chunkCount); err != nil {
+		t.Fatalf("querying chunks: %v", err)
+	}
+	if chunkCount == 0 {
+		t.Error("expected at least one chunk after restore")
+	}
+}
+
 func TestIndexer_DeactivatesMissingFiles(t *testing.T) {
 	database := openTestDB(t)
 	idx := New(database, 256)
