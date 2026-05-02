@@ -4,6 +4,7 @@
 
 PRAGMA foreign_keys=OFF;
 
+DROP TABLE IF EXISTS chunk_vectors_new;
 CREATE TABLE chunk_vectors_new (
     chunk_id    INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
     vector      BLOB NOT NULL
@@ -13,6 +14,7 @@ INSERT INTO chunk_vectors_new(chunk_id, vector)
 DROP TABLE chunk_vectors;
 ALTER TABLE chunk_vectors_new RENAME TO chunk_vectors;
 
+DROP TABLE IF EXISTS embeddings_new;
 CREATE TABLE embeddings_new (
     chunk_id    INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
     provider    TEXT NOT NULL,
