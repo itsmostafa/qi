@@ -1,15 +1,18 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
+	"github.com/itsmostafa/qi/internal/version"
 	"github.com/spf13/cobra"
 )
 
 var (
-	cfgFile string
-	verbose bool
-	format  string
+	cfgFile     string
+	verbose     bool
+	format      string
+	showVersion bool
 )
 
 var rootCmd = &cobra.Command{
@@ -17,6 +20,13 @@ var rootCmd = &cobra.Command{
 	Short:        "Local-first knowledge search",
 	Long:         `qi indexes your local documents and lets you search, query, and ask questions using BM25 and vector search.`,
 	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if showVersion {
+			fmt.Println(version.String())
+			return nil
+		}
+		return cmd.Help()
+	},
 }
 
 func Execute() {
@@ -27,10 +37,10 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/qi/config.yaml)")
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "verbose output")
 	rootCmd.PersistentFlags().StringVarP(&format, "format", "f", "text", "output format: text, json, markdown")
+	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "print version")
 
-	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(indexCmd)
 	rootCmd.AddCommand(searchCmd)
