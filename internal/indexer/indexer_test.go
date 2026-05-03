@@ -230,6 +230,112 @@ func TestIndexer_ReindexAfterDeletion(t *testing.T) {
 	}
 }
 
+func TestIndexer_ReactivateSameContent(t *testing.T) {
+	database := openTestDB(t)
+	idx := New(database, 256)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.md")
+	col := config.Collection{Name: "test", Path: dir, Extensions: []string{".md"}}
+
+	body := []byte("# Original\nOriginal content.")
+	if err := os.WriteFile(path, body, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := idx.Index(context.Background(), col); err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture chunk IDs and seed an embedding to detect spurious deletion.
+	rows, err := database.QueryContext(context.Background(),
+		`SELECT c.id FROM chunks c JOIN documents d ON d.id=c.doc_id
+		 WHERE d.collection='test' AND d.path='doc.md' ORDER BY c.id`)
+	if err != nil {
+		t.Fatalf("listing chunks: %v", err)
+	}
+	var originalChunkIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		originalChunkIDs = append(originalChunkIDs, id)
+	}
+	rows.Close()
+	if len(originalChunkIDs) == 0 {
+		t.Fatal("expected at least one chunk after initial index")
+	}
+
+	seedID := originalChunkIDs[0]
+	if err := database.InsertEmbedding(context.Background(), seedID, []float32{0.1, 0.2, 0.3, 0.4}); err != nil {
+		t.Fatalf("inserting chunk_vector: %v", err)
+	}
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO embeddings(chunk_id, provider, model, dimension) VALUES (?, 'test', 'test-model', 4)`,
+		seedID); err != nil {
+		t.Fatalf("inserting embeddings row: %v", err)
+	}
+
+	// Delete the file → deactivates the document.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := idx.Index(context.Background(), col); err != nil {
+		t.Fatal(err)
+	}
+
+	// Restore byte-identical content.
+	if err := os.WriteFile(path, body, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := idx.Index(context.Background(), col)
+	if err != nil {
+		t.Fatalf("index after restore: %v", err)
+	}
+	if stats.FilesAdded != 1 {
+		t.Errorf("expected 1 added, got %d", stats.FilesAdded)
+	}
+
+	// Document must be active again.
+	var active int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT active FROM documents WHERE collection='test' AND path='doc.md'`).
+		Scan(&active); err != nil {
+		t.Fatalf("querying restored document: %v", err)
+	}
+	if active != 1 {
+		t.Errorf("expected active=1, got %d", active)
+	}
+
+	// Chunk ID must be preserved — proves DELETE FROM chunks did not run.
+	var preservedCount int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM chunks WHERE id = ?`, seedID).Scan(&preservedCount); err != nil {
+		t.Fatalf("querying preserved chunk: %v", err)
+	}
+	if preservedCount != 1 {
+		t.Fatalf("expected seed chunk %d to survive restore, got count %d", seedID, preservedCount)
+	}
+
+	// Embedding and vector for the seed chunk must still exist.
+	var embCount int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM embeddings WHERE chunk_id = ?`, seedID).Scan(&embCount); err != nil {
+		t.Fatalf("querying embedding: %v", err)
+	}
+	if embCount != 1 {
+		t.Errorf("expected embedding for chunk %d to survive restore, got %d", seedID, embCount)
+	}
+
+	var vecCount int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM chunk_vectors WHERE chunk_id = ?`, seedID).Scan(&vecCount); err != nil {
+		t.Fatalf("querying chunk_vector: %v", err)
+	}
+	if vecCount != 1 {
+		t.Errorf("expected chunk_vector for chunk %d to survive restore, got %d", seedID, vecCount)
+	}
+}
+
 func TestIndexer_DeactivatesMissingFiles(t *testing.T) {
 	database := openTestDB(t)
 	idx := New(database, 256)

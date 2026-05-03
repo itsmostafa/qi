@@ -162,6 +162,18 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 		return nil // unchanged
 	}
 
+	// Fast-path: previously deactivated document restored with byte-identical content.
+	// Reactivate the row without touching chunks or embeddings — deleting chunks would
+	// cascade into chunk_vectors/embeddings (migration 003) and force pointless re-embedding.
+	if docID != 0 && existingActive == 0 && existingHash == hash {
+		if _, err := idx.db.ExecContext(ctx,
+			`UPDATE documents SET active=1, updated_at=datetime('now') WHERE id=?`, docID); err != nil {
+			return fmt.Errorf("reactivating document: %w", err)
+		}
+		stats.FilesAdded++
+		return nil
+	}
+
 	// Upsert content
 	if _, err := idx.db.ExecContext(ctx,
 		`INSERT OR IGNORE INTO content(hash, body) VALUES (?, ?)`,
