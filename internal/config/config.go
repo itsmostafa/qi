@@ -327,7 +327,7 @@ func writeConfigNode(configPath string, doc *yaml.Node) error {
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
-	return os.WriteFile(configPath, out, 0644)
+	return os.WriteFile(configPath, out, 0o600)
 }
 
 func (c *Config) validate() error {
