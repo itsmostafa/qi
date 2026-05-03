@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -153,7 +154,9 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	row := idx.db.QueryRowContext(ctx,
 		`SELECT id, content_hash, active FROM documents WHERE collection=? AND path=?`,
 		col.Name, relPath)
-	_ = row.Scan(&docID, &existingHash, &existingActive)
+	if err := row.Scan(&docID, &existingHash, &existingActive); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("looking up existing document: %w", err)
+	}
 
 	if existingActive == 1 && existingHash == hash {
 		return nil // unchanged
