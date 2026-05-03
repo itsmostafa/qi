@@ -22,10 +22,14 @@ CREATE TABLE embeddings_new (
     dimension   INTEGER NOT NULL DEFAULT 0,
     embedded_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
--- Omit dimension: older DBs may not have it (002 used CREATE TABLE IF NOT EXISTS,
--- which was a no-op when the table already existed without that column).
-INSERT INTO embeddings_new(chunk_id, provider, model, embedded_at)
-    SELECT chunk_id, provider, model, embedded_at FROM embeddings;
+-- Derive dimension from vector length (float32 = 4 bytes each) so that both
+-- old schemas (no dimension column) and new ones are handled correctly.
+INSERT INTO embeddings_new(chunk_id, provider, model, dimension, embedded_at)
+    SELECT e.chunk_id, e.provider, e.model,
+           COALESCE(length(cv.vector)/4, 0),
+           e.embedded_at
+    FROM embeddings e
+    LEFT JOIN chunk_vectors cv ON cv.chunk_id = e.chunk_id;
 DROP TABLE embeddings;
 ALTER TABLE embeddings_new RENAME TO embeddings;
 
