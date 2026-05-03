@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.0](https://github.com/itsmostafa/qi/compare/v0.5.1...v0.6.0) (2026-05-03)
+
+
+### Features
+
+* **indexer:** skip all dot-directories during walk ([36a17ca](https://github.com/itsmostafa/qi/commit/36a17ca643387773025713c6f501884a4ec9fcc0))
+
+
+### Bug Fixes
+
+* **db:** add ON DELETE CASCADE to chunk_vectors and embeddings ([07a05e8](https://github.com/itsmostafa/qi/commit/07a05e87e9940544e357dffea23efe8a35a7e616))
+* **db:** handle missing dimension column in legacy embeddings table ([6021475](https://github.com/itsmostafa/qi/commit/6021475092ccbfd8c79f2c5fcdad090e79c7e879))
+* **db:** make migration 003 idempotent with DROP IF EXISTS guards ([3c63343](https://github.com/itsmostafa/qi/commit/3c63343abdb6b76fc35d4b477159d70e2385bdaa))
+* **db:** preserve embedding dimension during migration 003 table rebuild ([1cc2607](https://github.com/itsmostafa/qi/commit/1cc260747fea131a671cc52ab12b332102168956))
+* **indexer:** preserve embeddings when reactivating unchanged documents ([40c2376](https://github.com/itsmostafa/qi/commit/40c23765a076d44de4fca87d601315d6a5354456))
+* **indexer:** reactivate deactivated documents when file is restored ([9b2a1dc](https://github.com/itsmostafa/qi/commit/9b2a1dc4d7e8408aa7d6792853037b9d4935167b))
+* **indexer:** reactivate deactivated documents when file is restored ([aa4b02d](https://github.com/itsmostafa/qi/commit/aa4b02d535d782c2664a17942d02ef7f29455d29))
+* **indexer:** return error on non-ErrNoRows scan failure in indexFile ([d58e3d6](https://github.com/itsmostafa/qi/commit/d58e3d6559bc2461b5b098add1b88ca034e5c31b))
+
 ## [0.5.1](https://github.com/itsmostafa/qi/compare/v0.5.0...v0.5.1) (2026-04-06)
 
 
