@@ -25,7 +25,7 @@ Save tokens by delegating some of your AI Agent's work to qi.
 ## Install
 
 ```sh
-brew tap itsmostafa/qi
+brew tap itsmostafa/qi https://github.com/itsmostafa/qi
 brew install qi
 ```
 
