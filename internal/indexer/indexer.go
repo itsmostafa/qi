@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -95,7 +96,8 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 			return err
 		}
 		if d.IsDir() {
-			if defaultIgnoreDirs[d.Name()] || ignoreSet[d.Name()] {
+			name := d.Name()
+			if defaultIgnoreDirs[name] || ignoreSet[name] || (strings.HasPrefix(name, ".") && name != ".") {
 				return filepath.SkipDir
 			}
 			return nil
@@ -145,16 +147,31 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 
 	hash := sha256sum(data)
 
-	// Check if document exists and unchanged
+	// Check if document exists (active or deactivated) and whether content changed
 	var existingHash string
 	var docID int64
+	var existingActive int
 	row := idx.db.QueryRowContext(ctx,
-		`SELECT id, content_hash FROM documents WHERE collection=? AND path=? AND active=1`,
+		`SELECT id, content_hash, active FROM documents WHERE collection=? AND path=?`,
 		col.Name, relPath)
-	_ = row.Scan(&docID, &existingHash)
+	if err := row.Scan(&docID, &existingHash, &existingActive); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("looking up existing document: %w", err)
+	}
 
-	if existingHash == hash {
+	if existingActive == 1 && existingHash == hash {
 		return nil // unchanged
+	}
+
+	// Fast-path: previously deactivated document restored with byte-identical content.
+	// Reactivate the row without touching chunks or embeddings — deleting chunks would
+	// cascade into chunk_vectors/embeddings (migration 003) and force pointless re-embedding.
+	if docID != 0 && existingActive == 0 && existingHash == hash {
+		if _, err := idx.db.ExecContext(ctx,
+			`UPDATE documents SET active=1, updated_at=datetime('now') WHERE id=?`, docID); err != nil {
+			return fmt.Errorf("reactivating document: %w", err)
+		}
+		stats.FilesAdded++
+		return nil
 	}
 
 	// Upsert content
@@ -198,9 +215,9 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 		newDocID, _ = res.LastInsertId()
 		stats.FilesAdded++
 	} else {
-		// Update
+		// Update (or reactivate a previously deactivated document)
 		_, err = tx.ExecContext(ctx,
-			`UPDATE documents SET title=?, content_hash=?, updated_at=datetime('now') WHERE id=?`,
+			`UPDATE documents SET title=?, content_hash=?, active=1, updated_at=datetime('now') WHERE id=?`,
 			title, hash, docID)
 		if err != nil {
 			return fmt.Errorf("updating document: %w", err)
@@ -210,7 +227,11 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 		if _, err := tx.ExecContext(ctx, `DELETE FROM chunks WHERE doc_id=?`, docID); err != nil {
 			return fmt.Errorf("deleting old chunks: %w", err)
 		}
-		stats.FilesUpdated++
+		if existingActive == 0 {
+			stats.FilesAdded++
+		} else {
+			stats.FilesUpdated++
+		}
 	}
 
 	// Insert chunks

@@ -14,8 +14,16 @@ qi index                                  # Index the current directory, or a na
 qi doctor                                 # Verify setup
 qi search "your query"                    # BM25 keyword search (no provider needed)
 qi query "your semantic question"         # Hybrid search (needs embedding provider)
-qi ask "what does X do?"                  # RAG Q&A (needs generation provider)
+qi ask "what does X do?"                  # RAG Q&A; use sparingly (needs generation provider)
 ```
+
+---
+
+## Command selection guidance
+
+Prefer `qi index` when the task is about adding, refreshing, or organizing source material.
+Prefer `qi search` or `qi query` when the task is about finding relevant documents, passages, or citations.
+Use `qi ask` sparingly, only when the user specifically needs a synthesized answer from an LLM rather than retrieved source results.
 
 ---
 
@@ -67,6 +75,7 @@ qi query "question" --explain               # show BM25/vector/RRF score breakdo
 
 ### `qi ask <question>`
 RAG Q&A: searches the knowledge base, sends relevant chunks to an LLM, returns an answer with citations.
+Use this sparingly; prefer `qi query` for normal exploration, evidence gathering, and source lookup.
 
 ```bash
 qi ask "What authentication methods are supported?"
@@ -240,9 +249,10 @@ qi index notes
 qi query "how does X work" --explain
 ```
 
-**RAG Q&A:**
+**RAG Q&A (use sparingly):**
 ```bash
 # also add a generation provider to config
+# prefer qi query unless you need a synthesized answer
 qi ask "Summarize the key decisions in my notes"
 ```
 

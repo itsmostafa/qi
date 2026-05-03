@@ -8,7 +8,9 @@
   <img src="assets/img/qi-logo.png" alt="qi logo" width="200" />
 </p>
 
-A local-first knowledge search CLI for macOS and Linux. Index and search anything — codebases, documentation, research papers, notes, wikis, datasets, logs, contracts, books — using BM25 full-text search, vector embeddings, and LLM-powered Q&A. Choose your own models via Ollama, LM Studio, llama.cpp, MLX or using OpenAI's cloud models.
+qi is an ultra-fast knowledge search CLI for your files on your local machine. No dependencies, no runtime, just a single executable that indexes code, docs, notes, papers, logs, and other text into SQLite, then gives you BM25 search, optional vector search, and grounded LLM Q&A with citations. Use it offline with Ollama, LM Studio, llama.cpp, or MLX, or connect OpenAI for cloud models.
+
+Save tokens by delegating some of your AI Agent's work to qi.
 
 ## Features
 
@@ -105,7 +107,6 @@ qi doctor
 | `qi delete <collection>` | Delete a named collection and all its indexed data |
 | `qi stats` | Show index statistics |
 | `qi doctor` | Health check |
-| `qi version` | Print version |
 
 ## Search Modes
 
