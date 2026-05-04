@@ -16,7 +16,7 @@ type App struct {
 	Config    *config.Config
 	DB        *db.DB
 	Indexer   *indexer.Indexer
-	Embedder  *indexer.Embedder  // nil if no embedding provider configured
+	Embedder  *indexer.Embedder // nil if no embedding provider configured
 	BM25      *search.BM25
 	Vector    *search.VectorSearch
 	Hybrid    *search.Hybrid
@@ -34,6 +34,12 @@ func New(ctx context.Context, cfgPath string) (*App, error) {
 	database, err := db.Open(ctx, cfg.DatabasePath)
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)
+	}
+	for _, col := range cfg.Collections {
+		if err := database.RenameCollectionData(ctx, col.OriginalName, col.Name, col.Path); err != nil {
+			_ = database.Close()
+			return nil, fmt.Errorf("normalizing collection %q: %w", col.Name, err)
+		}
 	}
 
 	a := &App{
