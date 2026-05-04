@@ -12,7 +12,7 @@ import (
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all named collections",
+	Short: "List all collections",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
@@ -24,7 +24,7 @@ var listCmd = &cobra.Command{
 
 		cols := a.Config.Collections
 		if len(cols) == 0 {
-			fmt.Println("No named collections found.")
+			fmt.Println("No collections found.")
 			return nil
 		}
 

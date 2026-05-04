@@ -53,7 +53,7 @@ One file. Every table in `internal/db/migrations/001_init.sql`. WAL mode enabled
 | `chunks_fts` | FTS5 virtual table mirroring chunk text. Trigger-maintained — the app never writes to it directly. |
 | `chunk_vectors` | Embedding vectors as little-endian `float32` BLOBs. |
 | `embeddings` | Provider, model, and dimension metadata for each embedded chunk. |
-| `collections` | Named collections from config or `qi index --name`. |
+| `collections` | Path-derived collections from config or `qi index <path>`. |
 | `index_runs` | Full audit log of every indexing run: file counts, timestamps, errors. |
 | `llm_cache` | Cached LLM responses keyed by `SHA-256(model + "\x00" + prompt)`. |
 
@@ -69,4 +69,4 @@ One file. Every table in `internal/db/migrations/001_init.sql`. WAL mode enabled
 
 - [`docs/configuration.md`](configuration.md) — all config fields with examples
 - [`docs/config.example.yaml`](config.example.yaml) — fully annotated config file
-- [`docs/named-collections.md`](named-collections.md) — named collections guide
+- [`docs/named-collections.md`](named-collections.md) — collections guide

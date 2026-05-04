@@ -41,13 +41,13 @@ collections:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | yes | Unique identifier used in search output and CLI flags |
+| `name` | no | Generated identifier used in search output and CLI flags; filled from `path` if omitted |
 | `path` | yes | Directory to index; supports `~` and relative paths |
 | `description` | no | Human-readable label |
 | `extensions` | no | File extensions to index; omit to use built-in defaults (`.md .txt .go .ts .py` …) |
 | `ignore` | no | Directory/file names to skip during indexing |
 
-Duplicate `name` values are rejected at startup.
+Collection names are derived from paths, for example `/Users/alice/Projects/tools/qi` becomes `Projects-tools-qi`. Duplicate generated names or duplicate canonical paths are rejected at startup.
 
 ---
 
