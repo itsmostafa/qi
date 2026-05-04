@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.7.0](https://github.com/itsmostafa/qi/compare/v0.6.0...v0.7.0) (2026-05-04)
+
+
+### Features
+
+* **app:** normalize legacy collection names on startup ([1cb7691](https://github.com/itsmostafa/qi/commit/1cb76910f97ff03c631c6cb9848c3d2b2ffd7154))
+* **cmd/index:** embed chunks after indexing when embedder is configured ([321f9dc](https://github.com/itsmostafa/qi/commit/321f9dc7071deb7db8b54ed1216d393425fe76b2))
+* **cmd/index:** remove --name flag and use auto-generated names ([8d3eb1b](https://github.com/itsmostafa/qi/commit/8d3eb1b4c105395c98a12d1b215b134eea759637))
+* **collections:** auto-generate collection names from path segments ([f49da60](https://github.com/itsmostafa/qi/commit/f49da6062ae4ba4771e7942039e4a8d2a8629020))
+* **config:** derive collection names from full path segments ([4bbc2cd](https://github.com/itsmostafa/qi/commit/4bbc2cdbcb50d6402001c6814cca2db447f91af5))
+* **db:** add RenameCollectionData for migrating legacy collection names ([b7c74c1](https://github.com/itsmostafa/qi/commit/b7c74c1caa4aa283c5173efa4f13834e51d04df8))
+* **search:** add query relaxation for natural-language BM25 queries ([221beeb](https://github.com/itsmostafa/qi/commit/221beebf83ab9a8c2a47753811d55c6a1fc35166))
+
+
+### Bug Fixes
+
+* **cmd/delete:** resolve collection by generated or original name ([46f6273](https://github.com/itsmostafa/qi/commit/46f627320c63a03c1fc025e26b9280e664cd3b72))
+* **config:** reject collection slug collisions ([199cd82](https://github.com/itsmostafa/qi/commit/199cd82d53e435b235beef3a866cb420fe6efeea))
+* **config:** restrict config file permissions to owner-only ([6e1ed59](https://github.com/itsmostafa/qi/commit/6e1ed59d3241da9f84675a1159b737181d6b1552))
+* **config:** restrict config file permissions to owner-only ([fa9d3ca](https://github.com/itsmostafa/qi/commit/fa9d3ca5ddd068f1f4a87b7943cb2b8fbe10e244))
+* **delete:** prefer exact collection name ([d07c655](https://github.com/itsmostafa/qi/commit/d07c6555206651b0f0d28cff840fed0036d0a69b))
+
 ## [0.6.0](https://github.com/itsmostafa/qi/compare/v0.5.1...v0.6.0) (2026-05-03)
 
 
