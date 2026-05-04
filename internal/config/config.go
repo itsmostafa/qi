@@ -190,9 +190,9 @@ func AddCollection(configPath string, col Collection) error {
 			continue
 		}
 		seq := root.Content[i+1]
-		// Update an existing entry if either its generated name or canonical
-		// path matches. This lets old configs with custom names be normalized
-		// without creating another entry for the same directory.
+		// Update an existing entry only when its canonical path matches. This
+		// lets old configs with custom names be normalized without allowing a
+		// generated-name collision to rewrite another collection's path.
 		for _, item := range seq.Content {
 			itemName := mappingValue(item, "name")
 			itemPath := mappingValue(item, "path")
@@ -201,7 +201,10 @@ func AddCollection(configPath string, col Collection) error {
 			if itemPath != "" {
 				generatedName = SlugFromPath(resolvedItemPath)
 			}
-			if itemName != col.Name && generatedName != col.Name && !sameCanonicalPath(resolvedItemPath, col.Path) {
+			if !sameCanonicalPath(resolvedItemPath, col.Path) {
+				if itemName == col.Name || generatedName == col.Name {
+					return fmt.Errorf("collection name %q collides with existing path %q", col.Name, itemPath)
+				}
 				continue
 			}
 			for j := 0; j+1 < len(item.Content); j += 2 {

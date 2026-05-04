@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -228,6 +229,73 @@ providers:
 	}
 	if cfg.Providers.Generation.APIKey != "" {
 		t.Errorf("OPENAI_API_KEY should not apply to non-openai providers, got %q", cfg.Providers.Generation.APIKey)
+	}
+}
+
+func TestAddCollectionNormalizesSamePathLegacyName(t *testing.T) {
+	dir := t.TempDir()
+	collectionPath := filepath.Join(dir, "foo bar")
+	if err := os.Mkdir(collectionPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := writeTempConfig(t, `
+collections:
+  - name: legacy
+    path: `+collectionPath+`
+`)
+
+	if err := AddCollection(configPath, Collection{Path: collectionPath}); err != nil {
+		t.Fatalf("AddCollection failed: %v", err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if got, want := len(cfg.Collections), 1; got != want {
+		t.Fatalf("collection count = %d, want %d", got, want)
+	}
+	if got, want := cfg.Collections[0].Name, SlugFromPath(collectionPath); got != want {
+		t.Fatalf("collection name = %q, want %q", got, want)
+	}
+	if cfg.Collections[0].OriginalName != "" {
+		t.Fatalf("legacy name was not normalized in config, got original name %q", cfg.Collections[0].OriginalName)
+	}
+}
+
+func TestAddCollectionRejectsSlugCollisionDifferentPath(t *testing.T) {
+	dir := t.TempDir()
+	firstPath := filepath.Join(dir, "foo bar")
+	secondPath := filepath.Join(dir, "foo@bar")
+	for _, path := range []string{firstPath, secondPath} {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := SlugFromPath(secondPath), SlugFromPath(firstPath); got != want {
+		t.Fatalf("test paths must collide: second slug %q, first slug %q", got, want)
+	}
+	configPath := writeTempConfig(t, `
+collections:
+  - name: `+SlugFromPath(firstPath)+`
+    path: `+firstPath+`
+`)
+
+	err := AddCollection(configPath, Collection{Path: secondPath})
+	if err == nil {
+		t.Fatal("expected slug collision error")
+	}
+	if !strings.Contains(err.Error(), "collides with existing path") {
+		t.Fatalf("expected collision error, got %v", err)
+	}
+	cfg, loadErr := Load(configPath)
+	if loadErr != nil {
+		t.Fatalf("Load failed: %v", loadErr)
+	}
+	if got, want := len(cfg.Collections), 1; got != want {
+		t.Fatalf("collection count = %d, want %d", got, want)
+	}
+	if got := cfg.Collections[0].Path; got != firstPath {
+		t.Fatalf("existing collection path was overwritten: got %q, want %q", got, firstPath)
 	}
 }
 
