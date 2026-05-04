@@ -37,15 +37,7 @@ var askCmd = &cobra.Command{
 			return fmt.Errorf("ask failed: %w", err)
 		}
 
-		fmt.Fprintln(os.Stdout, result.Answer)
-
-		if len(result.Sources) > 0 {
-			fmt.Fprintln(os.Stdout)
-			fmt.Fprintln(os.Stdout, "Sources:")
-			formatter := output.New(format)
-			return formatter.WriteResults(os.Stdout, result.Sources)
-		}
-		return nil
+		return output.WriteAskResult(os.Stdout, result.Answer, result.Sources, a.Config.Collections, format)
 	},
 }
 
