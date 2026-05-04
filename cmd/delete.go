@@ -23,15 +23,17 @@ var deleteCmd = &cobra.Command{
 		}
 		defer a.Close()
 
+		targetName := name
 		inConfig := false
 		for _, c := range a.Config.Collections {
-			if c.Name == name {
+			if c.Name == name || c.OriginalName == name {
+				targetName = c.Name
 				inConfig = true
 				break
 			}
 		}
 
-		inDB, err := collectionExistsInDB(ctx, a.DB, name)
+		inDB, err := collectionExistsInDB(ctx, a.DB, targetName)
 		if err != nil {
 			return fmt.Errorf("checking collection: %w", err)
 		}
@@ -39,7 +41,7 @@ var deleteCmd = &cobra.Command{
 			return fmt.Errorf("collection %q not found", name)
 		}
 
-		if err := a.DB.DeleteCollection(ctx, name); err != nil {
+		if err := a.DB.DeleteCollection(ctx, targetName); err != nil {
 			return fmt.Errorf("deleting collection data: %w", err)
 		}
 
@@ -48,12 +50,12 @@ var deleteCmd = &cobra.Command{
 			if cfgPath == "" {
 				cfgPath = config.DefaultConfigPath()
 			}
-			if err := config.RemoveCollection(cfgPath, name); err != nil {
+			if err := config.RemoveCollection(cfgPath, targetName); err != nil {
 				return fmt.Errorf("removing collection from config: %w", err)
 			}
 		}
 
-		fmt.Printf("Deleted collection %q\n", name)
+		fmt.Printf("Deleted collection %q\n", targetName)
 		return nil
 	},
 }

@@ -29,8 +29,9 @@ func TestDeleteCommandDeletesIndexedOnlyCollection(t *testing.T) {
 	assertDeleteTestCount(t, database, `SELECT COUNT(*) FROM chunk_vectors`, 1)
 }
 
-func TestDeleteCommandDeletesNamedCollectionAndConfigEntry(t *testing.T) {
+func TestDeleteCommandDeletesCollectionAndConfigEntry(t *testing.T) {
 	collectionPath := t.TempDir()
+	collectionName := config.SlugFromPath(collectionPath)
 	cfgPath, dbPath := writeDeleteTestConfig(t, fmt.Sprintf(`
 collections:
   - name: named
@@ -45,18 +46,20 @@ collections:
 		t.Fatalf("loading config after delete: %v", err)
 	}
 	for _, col := range cfg.Collections {
-		if col.Name == "named" {
-			t.Fatalf("named collection still present in config: %+v", cfg.Collections)
+		if col.Name == collectionName || col.OriginalName == "named" {
+			t.Fatalf("collection still present in config: %+v", cfg.Collections)
 		}
 	}
 
 	database := openDeleteTestDB(t, dbPath)
 	defer database.Close()
 	assertDeleteTestCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'named'`, 0)
+	assertDeleteTestCount(t, database, fmt.Sprintf(`SELECT COUNT(*) FROM documents WHERE collection = '%s'`, collectionName), 0)
 	assertDeleteTestCount(t, database, `SELECT COUNT(*) FROM chunks`, 0)
 	assertDeleteTestCount(t, database, `SELECT COUNT(*) FROM embeddings`, 0)
 	assertDeleteTestCount(t, database, `SELECT COUNT(*) FROM chunk_vectors`, 0)
 	assertDeleteTestCount(t, database, `SELECT COUNT(*) FROM index_runs WHERE collection = 'named'`, 0)
+	assertDeleteTestCount(t, database, fmt.Sprintf(`SELECT COUNT(*) FROM index_runs WHERE collection = '%s'`, collectionName), 0)
 }
 
 func TestDeleteCommandNotFound(t *testing.T) {
