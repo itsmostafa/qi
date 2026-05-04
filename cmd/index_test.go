@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/itsmostafa/qi/internal/app"
 	"github.com/itsmostafa/qi/internal/config"
+	"github.com/itsmostafa/qi/internal/db"
+	"github.com/itsmostafa/qi/internal/indexer"
 )
 
 func TestIndexCommandDoesNotAcceptNameFlag(t *testing.T) {
@@ -100,6 +103,51 @@ func TestAutoCollectionSavesNewCollectionOncePerApp(t *testing.T) {
 	}
 }
 
+func TestRunIndexEmbedsWhenProviderConfigured(t *testing.T) {
+	ctx := context.Background()
+	collectionPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(collectionPath, "doc.md"), []byte("# Doc\nGo is useful."), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "qi.db"))
+	if err != nil {
+		t.Fatalf("opening db: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	a := &app.App{
+		Indexer:  indexer.New(database, 256),
+		Embedder: indexer.NewEmbedder(database, testEmbeddingProvider{}),
+	}
+	col := config.Collection{Name: "test", Path: collectionPath, Extensions: []string{".md"}}
+
+	var runErr error
+	output := captureIndexTestOutput(t, func() {
+		runErr = runIndex(ctx, a, []config.Collection{col})
+	})
+	if runErr != nil {
+		t.Fatalf("runIndex failed: %v", runErr)
+	}
+	if !strings.Contains(output, "embedding chunks") {
+		t.Fatalf("expected embedding status in output, got %q", output)
+	}
+
+	var chunkCount, embeddingCount int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM chunks`).Scan(&chunkCount); err != nil {
+		t.Fatalf("counting chunks: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM embeddings`).Scan(&embeddingCount); err != nil {
+		t.Fatalf("counting embeddings: %v", err)
+	}
+	if chunkCount == 0 {
+		t.Fatal("expected indexed chunks")
+	}
+	if embeddingCount != chunkCount {
+		t.Fatalf("expected embeddings for every chunk, got embeddings=%d chunks=%d", embeddingCount, chunkCount)
+	}
+}
+
 func writeIndexTestConfig(t *testing.T, content string) string {
 	t.Helper()
 
@@ -144,3 +192,17 @@ func captureIndexTestOutput(t *testing.T, fn func()) string {
 	}
 	return string(out)
 }
+
+type testEmbeddingProvider struct{}
+
+func (testEmbeddingProvider) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	embeddings := make([][]float32, len(texts))
+	for i := range texts {
+		embeddings[i] = []float32{1, 0, 0, 0}
+	}
+	return embeddings, nil
+}
+
+func (testEmbeddingProvider) ModelName() string { return "test-model" }
+
+func (testEmbeddingProvider) Dimension() int { return 4 }

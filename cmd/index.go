@@ -150,6 +150,12 @@ func runIndex(ctx context.Context, a *app.App, collections []config.Collection) 
 		}
 		fmt.Printf("  scanned=%d added=%d updated=%d removed=%d time=%s\n",
 			stats.FilesScanned, stats.FilesAdded, stats.FilesUpdated, stats.FilesRemoved, stats.Duration.Round(1000000))
+		if a.Embedder != nil {
+			fmt.Printf("  embedding chunks...\n")
+			if err := a.Embedder.EmbedCollection(ctx, col.Name); err != nil {
+				return fmt.Errorf("embedding collection %q: %w", col.Name, err)
+			}
+		}
 	}
 	return nil
 }
