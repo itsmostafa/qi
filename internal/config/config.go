@@ -272,6 +272,10 @@ func RemoveCollection(configPath string, name string) error {
 			continue
 		}
 		seq := root.Content[i+1]
+		exactIndex := -1
+		exactMatches := 0
+		legacyIndex := -1
+		legacyMatches := 0
 		for j, item := range seq.Content {
 			itemName := mappingValue(item, "name")
 			itemPath := mappingValue(item, "path")
@@ -279,10 +283,28 @@ func RemoveCollection(configPath string, name string) error {
 			if itemPath != "" {
 				generatedName = SlugFromPath(resolveConfigFilePath(configDir, itemPath))
 			}
-			if itemName == name || generatedName == name {
-				seq.Content = append(seq.Content[:j], seq.Content[j+1:]...)
-				return writeConfigNode(configPath, &doc)
+			if generatedName == name {
+				exactIndex = j
+				exactMatches++
 			}
+			if itemName == name {
+				legacyIndex = j
+				legacyMatches++
+			}
+		}
+		if exactMatches > 1 {
+			return fmt.Errorf("collection %q is ambiguous in config", name)
+		}
+		if exactMatches == 1 {
+			seq.Content = append(seq.Content[:exactIndex], seq.Content[exactIndex+1:]...)
+			return writeConfigNode(configPath, &doc)
+		}
+		if legacyMatches > 1 {
+			return fmt.Errorf("collection %q is ambiguous in config", name)
+		}
+		if legacyMatches == 1 {
+			seq.Content = append(seq.Content[:legacyIndex], seq.Content[legacyIndex+1:]...)
+			return writeConfigNode(configPath, &doc)
 		}
 		return fmt.Errorf("collection %q not found in config", name)
 	}

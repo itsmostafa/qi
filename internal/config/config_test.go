@@ -262,6 +262,43 @@ collections:
 	}
 }
 
+func TestRemoveCollectionPrefersGeneratedNameOverLegacyName(t *testing.T) {
+	dir := t.TempDir()
+	firstPath := filepath.Join(dir, "alpha")
+	secondPath := filepath.Join(dir, "beta")
+	for _, path := range []string{firstPath, secondPath} {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstName := SlugFromPath(firstPath)
+	secondName := SlugFromPath(secondPath)
+	configPath := writeTempConfig(t, `
+collections:
+  - name: `+secondName+`
+    path: `+firstPath+`
+  - path: `+secondPath+`
+`)
+
+	if err := RemoveCollection(configPath, secondName); err != nil {
+		t.Fatalf("RemoveCollection failed: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if got, want := len(cfg.Collections), 1; got != want {
+		t.Fatalf("collection count = %d, want %d", got, want)
+	}
+	if got := cfg.Collections[0].Name; got != firstName {
+		t.Fatalf("remaining collection name = %q, want %q", got, firstName)
+	}
+	if got := cfg.Collections[0].OriginalName; got != secondName {
+		t.Fatalf("remaining original name = %q, want %q", got, secondName)
+	}
+}
+
 func TestAddCollectionRejectsSlugCollisionDifferentPath(t *testing.T) {
 	dir := t.TempDir()
 	firstPath := filepath.Join(dir, "foo bar")

@@ -35,7 +35,7 @@ func New(ctx context.Context, cfgPath string) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)
 	}
-	for _, col := range cfg.Collections {
+	for _, col := range normalizableLegacyCollections(cfg.Collections) {
 		if err := database.RenameCollectionData(ctx, col.OriginalName, col.Name, col.Path); err != nil {
 			_ = database.Close()
 			return nil, fmt.Errorf("normalizing collection %q: %w", col.Name, err)
@@ -71,4 +71,30 @@ func New(ctx context.Context, cfgPath string) (*App, error) {
 // Close releases all resources.
 func (a *App) Close() error {
 	return a.DB.Close()
+}
+
+func normalizableLegacyCollections(collections []config.Collection) []config.Collection {
+	currentNames := map[string]bool{}
+	legacyNameCounts := map[string]int{}
+	for _, col := range collections {
+		currentNames[col.Name] = true
+		if col.OriginalName != "" && col.OriginalName != col.Name {
+			legacyNameCounts[col.OriginalName]++
+		}
+	}
+
+	normalizable := make([]config.Collection, 0, len(collections))
+	for _, col := range collections {
+		if col.OriginalName == "" || col.OriginalName == col.Name {
+			continue
+		}
+		if legacyNameCounts[col.OriginalName] > 1 {
+			continue
+		}
+		if currentNames[col.OriginalName] {
+			continue
+		}
+		normalizable = append(normalizable, col)
+	}
+	return normalizable
 }

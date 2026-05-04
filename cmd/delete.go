@@ -23,14 +23,9 @@ var deleteCmd = &cobra.Command{
 		}
 		defer a.Close()
 
-		targetName := name
-		inConfig := false
-		for _, c := range a.Config.Collections {
-			if c.Name == name || c.OriginalName == name {
-				targetName = c.Name
-				inConfig = true
-				break
-			}
+		targetName, inConfig, err := resolveDeleteTarget(a.Config.Collections, name)
+		if err != nil {
+			return err
 		}
 
 		inDB, err := collectionExistsInDB(ctx, a.DB, targetName)
@@ -58,6 +53,30 @@ var deleteCmd = &cobra.Command{
 		fmt.Printf("Deleted collection %q\n", targetName)
 		return nil
 	},
+}
+
+func resolveDeleteTarget(collections []config.Collection, name string) (string, bool, error) {
+	for _, c := range collections {
+		if c.Name == name {
+			return c.Name, true, nil
+		}
+	}
+
+	targetName := ""
+	matches := 0
+	for _, c := range collections {
+		if c.OriginalName == name {
+			targetName = c.Name
+			matches++
+		}
+	}
+	if matches > 1 {
+		return "", false, fmt.Errorf("collection %q is ambiguous; matches multiple legacy names", name)
+	}
+	if matches == 1 {
+		return targetName, true, nil
+	}
+	return name, false, nil
 }
 
 func collectionExistsInDB(ctx context.Context, database *db.DB, name string) (bool, error) {

@@ -62,6 +62,57 @@ collections:
 	assertDeleteTestCount(t, database, fmt.Sprintf(`SELECT COUNT(*) FROM index_runs WHERE collection = '%s'`, collectionName), 0)
 }
 
+func TestDeleteCommandPrefersCurrentNameOverLegacyNameCollision(t *testing.T) {
+	dir := t.TempDir()
+	legacyPath := filepath.Join(dir, "alpha")
+	currentPath := filepath.Join(dir, "beta")
+	for _, path := range []string{legacyPath, currentPath} {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacyGeneratedName := config.SlugFromPath(legacyPath)
+	currentName := config.SlugFromPath(currentPath)
+	cfgPath, dbPath := writeDeleteTestConfig(t, fmt.Sprintf(`
+collections:
+  - name: %s
+    path: %s
+  - path: %s
+`, currentName, legacyPath, currentPath))
+	insertDeleteTestCollection(t, dbPath, currentName)
+
+	runDeleteCommand(t, cfgPath, currentName)
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("loading config after delete: %v", err)
+	}
+	if got, want := len(cfg.Collections), 1; got != want {
+		t.Fatalf("collection count = %d, want %d", got, want)
+	}
+	if got := cfg.Collections[0].Name; got != legacyGeneratedName {
+		t.Fatalf("remaining collection name = %q, want %q", got, legacyGeneratedName)
+	}
+	if got := cfg.Collections[0].OriginalName; got != currentName {
+		t.Fatalf("remaining original name = %q, want %q", got, currentName)
+	}
+
+	database := openDeleteTestDB(t, dbPath)
+	defer database.Close()
+	assertDeleteTestCount(t, database, fmt.Sprintf(`SELECT COUNT(*) FROM documents WHERE collection = '%s'`, currentName), 0)
+	assertDeleteTestCount(t, database, fmt.Sprintf(`SELECT COUNT(*) FROM documents WHERE collection = '%s'`, legacyGeneratedName), 0)
+}
+
+func TestResolveDeleteTargetRejectsAmbiguousLegacyName(t *testing.T) {
+	_, _, err := resolveDeleteTarget([]config.Collection{
+		{Name: "one", OriginalName: "legacy"},
+		{Name: "two", OriginalName: "legacy"},
+	}, "legacy")
+	if err == nil {
+		t.Fatal("expected ambiguous legacy name error")
+	}
+}
+
 func TestDeleteCommandNotFound(t *testing.T) {
 	cfgPath, _ := writeDeleteTestConfig(t, "")
 
