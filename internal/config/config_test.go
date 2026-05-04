@@ -30,8 +30,11 @@ collections:
 	if cfg.DatabasePath != "/tmp/test.db" {
 		t.Errorf("unexpected db path: %s", cfg.DatabasePath)
 	}
-	if len(cfg.Collections) != 1 || cfg.Collections[0].Name != "docs" {
+	if len(cfg.Collections) != 1 || cfg.Collections[0].Name != SlugFromPath("/tmp") {
 		t.Errorf("unexpected collections: %+v", cfg.Collections)
+	}
+	if cfg.Collections[0].OriginalName != "docs" {
+		t.Errorf("expected original collection name to be preserved, got %q", cfg.Collections[0].OriginalName)
 	}
 }
 
@@ -57,13 +60,27 @@ func TestLoad_DuplicateCollection(t *testing.T) {
 	path := writeTempConfig(t, `
 collections:
   - name: docs
-    path: /tmp
+    path: /tmp/foo bar
   - name: docs
-    path: /var
+    path: /tmp/foo@bar
 `)
 	_, err := Load(path)
 	if err == nil {
-		t.Error("expected error for duplicate collection name")
+		t.Error("expected error for duplicate generated collection name")
+	}
+}
+
+func TestLoad_DuplicateCollectionPath(t *testing.T) {
+	path := writeTempConfig(t, `
+collections:
+  - name: docs
+    path: /tmp/docs
+  - name: notes
+    path: /tmp/../tmp/docs
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for duplicate collection path")
 	}
 }
 
@@ -214,51 +231,6 @@ providers:
 	}
 }
 
-func TestRenameCollection(t *testing.T) {
-	path := writeTempConfig(t, `
-collections:
-  - name: old-name
-    path: /tmp/docs
-  - name: other
-    path: /tmp/other
-`)
-	if err := RenameCollection(path, "old-name", "new-name"); err != nil {
-		t.Fatalf("RenameCollection failed: %v", err)
-	}
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load after rename failed: %v", err)
-	}
-	names := make([]string, len(cfg.Collections))
-	for i, c := range cfg.Collections {
-		names[i] = c.Name
-	}
-	for _, c := range cfg.Collections {
-		if c.Name == "old-name" {
-			t.Errorf("old name still present after rename")
-		}
-		if c.Name == "new-name" && c.Path != "/tmp/docs" {
-			t.Errorf("path changed after rename: got %q", c.Path)
-		}
-	}
-	if len(cfg.Collections) != 2 {
-		t.Errorf("expected 2 collections after rename, got %d: %v", len(cfg.Collections), names)
-	}
-}
-
-func TestRenameCollection_NotFound(t *testing.T) {
-	path := writeTempConfig(t, `
-collections:
-  - name: docs
-    path: /tmp
-`)
-	err := RenameCollection(path, "nonexistent", "new-name")
-	if err == nil {
-		t.Error("expected error renaming nonexistent collection")
-	}
-}
-
 func TestExpandHome(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	tests := []struct {
@@ -274,5 +246,109 @@ func TestExpandHome(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("ExpandHome(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
+	}
+}
+
+func TestCanonicalPath(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(wd); err != nil {
+			t.Fatalf("restoring working directory: %v", err)
+		}
+	}()
+
+	got, err := CanonicalPath("missing/../file.txt")
+	if err != nil {
+		t.Fatalf("CanonicalPath returned error: %v", err)
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(realDir, "file.txt")
+	if got != want {
+		t.Fatalf("CanonicalPath relative path = %q, want %q", got, want)
+	}
+}
+
+func TestCanonicalPathExpandsHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := CanonicalPath("~/qi-canonical-test-missing")
+	if err != nil {
+		t.Fatalf("CanonicalPath returned error: %v", err)
+	}
+	want := filepath.Join(home, "qi-canonical-test-missing")
+	if got != want {
+		t.Fatalf("CanonicalPath home path = %q, want %q", got, want)
+	}
+}
+
+func TestCanonicalPathResolvesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	got, err := CanonicalPath(link)
+	if err != nil {
+		t.Fatalf("CanonicalPath returned error: %v", err)
+	}
+	realTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != realTarget {
+		t.Fatalf("CanonicalPath symlink = %q, want %q", got, realTarget)
+	}
+}
+
+func TestSlugFromPath(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "mac user project path",
+			path: "/Users/alice/Projects/tools/qi",
+			want: "Projects-tools-qi",
+		},
+		{
+			name: "linux user project path",
+			path: "/home/alice/Projects/tools/qi",
+			want: "Projects-tools-qi",
+		},
+		{
+			name: "spaces and punctuation",
+			path: "/tmp/My Notes/docs.v1",
+			want: "tmp-My-Notes-docs-v1",
+		},
+		{
+			name: "root fallback",
+			path: "/",
+			want: "collection",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SlugFromPath(tt.path); got != tt.want {
+				t.Fatalf("SlugFromPath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
 	}
 }
