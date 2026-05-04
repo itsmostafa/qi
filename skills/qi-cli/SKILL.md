@@ -10,7 +10,7 @@ qi is a local-first knowledge search CLI. It indexes documents into SQLite and s
 ```bash
 qi init                                   # Create config + database
 $EDITOR ~/.config/qi/config.yaml         # Add collections and (optionally) providers
-qi index                                  # Index the current directory, or a named collection
+qi index                                  # Index the current directory, or a collection
 qi doctor                                 # Verify setup
 qi search "your query"                    # BM25 keyword search (no provider needed)
 qi query "your semantic question"         # Hybrid search (needs embedding provider)
@@ -42,11 +42,7 @@ Indexes documents. SHA-256 content hashing means unchanged files are skipped.
 ```bash
 qi index                              # indexes current working directory
 qi index ~/notes                      # any absolute or relative path
-qi index notes                        # named collection from config
-
-# --name saves the directory as a named collection in config, then indexes it
-qi index ~/notes --name notes         # save + index ~/notes as "notes"
-qi index --name notes                 # save + index current directory as "notes"
+qi index notes                        # generated collection name from config
 ```
 
 ### `qi search <query>`
@@ -92,14 +88,14 @@ qi get abc123
 ```
 
 ### `qi list`
-List all named collections defined in config (name and path).
+List all collections defined in config (name and path).
 
 ```bash
 qi list
 ```
 
 ### `qi delete <collection>`
-Delete a named collection: removes all indexed data from the database and removes the collection entry from config. Irreversible.
+Delete a collection: removes all indexed data from the database and removes the collection entry from config. Irreversible.
 
 ```bash
 qi delete notes
@@ -230,14 +226,14 @@ Search results show locations like `qi://notes/2024/jan.md [Section > Subsection
 **Index and search (no provider needed):**
 ```bash
 qi init
-qi index ~/notes --name notes    # saves and indexes ~/notes as "notes"
+qi index ~/notes                 # saves and indexes ~/notes as "notes"
 qi search "my keyword" -c notes
 ```
 
-**Manage named collections:**
+**Manage collections:**
 ```bash
 qi list                          # see all configured collections
-qi index ~/projects --name code  # add a new collection
+qi index ~/projects              # add a new collection
 qi delete old-notes              # remove collection data + config entry
 ```
 

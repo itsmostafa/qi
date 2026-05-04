@@ -4,7 +4,8 @@
 # Path to the SQLite database (supports ~ expansion)
 database_path: ~/.local/share/qi/qi.db
 
-# Collections: directories of documents to index
+# Collections: directories of documents to index.
+# Names are generated from paths; keep name aligned with path.
 collections:
   - name: notes
     path: ~/notes
@@ -12,7 +13,7 @@ collections:
     extensions: [.md, .txt]     # Omit to use defaults (.md, .txt, .go, .ts, etc.)
     ignore: [.git, node_modules, .DS_Store]
 
-  - name: code
+  - name: Projects-myproject
     path: ~/Projects/myproject
     description: Source code for myproject
     extensions: [.go, .ts, .py]

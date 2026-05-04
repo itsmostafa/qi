@@ -12,23 +12,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var indexName string
-
 var indexCmd = &cobra.Command{
 	Use:   "index [path|collection]",
 	Short: "Index documents into the knowledge base",
-	Long: `Index documents from a directory or named collection.
+	Args:  cobra.MaximumNArgs(1),
+	Long: `Index documents from a directory or collection.
 
-With no arguments, indexes the current directory (auto-named from path).
-With a path argument (absolute, relative, or starting with ~), indexes that directory (auto-named from path).
-With a collection name, indexes the named collection from config.
+With no arguments, indexes the current directory (named from path).
+With a path argument (absolute, relative, or starting with ~), indexes that directory (named from path).
+With a collection name, indexes the collection from config.
 
-A collection name is derived automatically from the directory path on first run:
-  /Users/alice/Projects/tools/qi → Projects-tools-qi
-
-Use --name to choose a custom collection name instead:
-  qi index ~/notes --name notes
-  qi index src --name src`,
+A collection name is derived automatically from the directory path:
+  /Users/alice/Projects/tools/qi -> Projects-tools-qi`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		a, err := app.New(ctx, cfgFile)
@@ -37,49 +32,9 @@ Use --name to choose a custom collection name instead:
 		}
 		defer a.Close()
 
-		// --name: treat arg (or cwd) as path, save to config, then index.
-		if indexName != "" {
-			var dir string
-			if len(args) > 0 {
-				dir, err = filepath.Abs(config.ExpandHome(args[0]))
-			} else {
-				dir, err = os.Getwd()
-			}
-			if err != nil {
-				return fmt.Errorf("resolving path: %w", err)
-			}
-			if _, err := os.Stat(dir); err != nil {
-				return fmt.Errorf("path %q does not exist", dir)
-			}
-			cfgPath := cfgFile
-			if cfgPath == "" {
-				cfgPath = config.DefaultConfigPath()
-			}
-			// If the path is already registered under a different name, rename it
-			// instead of creating a duplicate entry.
-			existing := findCollectionByPath(a.Config.Collections, dir)
-			if existing != nil && existing.Name != indexName {
-				if err := config.RenameCollection(cfgPath, existing.Name, indexName); err != nil {
-					return fmt.Errorf("renaming collection %q → %q: %w", existing.Name, indexName, err)
-				}
-				fmt.Printf("Renamed collection %q → %q\n", existing.Name, indexName)
-			}
-			col := config.Collection{Name: indexName, Path: dir}
-			if existing != nil {
-				col.Description = existing.Description
-				col.Extensions = existing.Extensions
-				col.Ignore = existing.Ignore
-			}
-			if err := config.AddCollection(cfgPath, col); err != nil {
-				return fmt.Errorf("saving collection to config: %w", err)
-			}
-			fmt.Printf("Saved collection %q → %s\n", indexName, dir)
-			return runIndex(ctx, a, []config.Collection{col})
-		}
-
-		// If arg looks like a path, index it as a (possibly new) named collection.
+		// If arg looks like a path, index it as a (possibly new) collection.
 		if len(args) > 0 && isPathArg(args[0]) {
-			dir, err := filepath.Abs(config.ExpandHome(args[0]))
+			dir, err := resolveIndexPath(args[0])
 			if err != nil {
 				return fmt.Errorf("resolving path: %w", err)
 			}
@@ -90,11 +45,11 @@ Use --name to choose a custom collection name instead:
 			return runIndex(ctx, a, []config.Collection{col})
 		}
 
-		// No args: index current directory as a (possibly new) named collection.
+		// No args: index current directory as a (possibly new) collection.
 		if len(args) == 0 {
-			cwd, err := os.Getwd()
+			cwd, err := resolveIndexPath(".")
 			if err != nil {
-				return fmt.Errorf("getting current directory: %w", err)
+				return fmt.Errorf("resolving current directory: %w", err)
 			}
 			col, err := autoCollection(a, cwd)
 			if err != nil {
@@ -106,16 +61,12 @@ Use --name to choose a custom collection name instead:
 		// Otherwise treat arg as a collection name.
 		name := args[0]
 		for _, c := range a.Config.Collections {
-			if c.Name == name {
+			if c.Name == name || c.OriginalName == name {
 				return runIndex(ctx, a, []config.Collection{c})
 			}
 		}
 		return fmt.Errorf("collection %q not found in config", name)
 	},
-}
-
-func init() {
-	indexCmd.Flags().StringVar(&indexName, "name", "", "save directory as a named collection in config")
 }
 
 // autoCollection returns the existing collection for absPath if one is already
@@ -126,30 +77,58 @@ func autoCollection(a *app.App, absPath string) (config.Collection, error) {
 		return config.Collection{}, fmt.Errorf("path %q does not exist", absPath)
 	}
 	if existing := findCollectionByPath(a.Config.Collections, absPath); existing != nil {
+		if existing.OriginalName != "" {
+			if err := saveCollection(*existing); err != nil {
+				return config.Collection{}, err
+			}
+			fmt.Printf("Updated collection %q -> %s\n", existing.Name, existing.Path)
+			existing.OriginalName = ""
+		}
 		return *existing, nil
 	}
 	slug := config.SlugFromPath(absPath)
 	col := config.Collection{Name: slug, Path: absPath}
+	if err := saveCollection(col); err != nil {
+		return config.Collection{}, err
+	}
+	fmt.Printf("Saved collection %q -> %s\n", slug, absPath)
+	a.Config.Collections = append(a.Config.Collections, col)
+	return col, nil
+}
+
+func saveCollection(col config.Collection) error {
 	cfgPath := cfgFile
 	if cfgPath == "" {
 		cfgPath = config.DefaultConfigPath()
 	}
 	if err := config.AddCollection(cfgPath, col); err != nil {
-		return config.Collection{}, fmt.Errorf("saving collection to config: %w", err)
+		return fmt.Errorf("saving collection to config: %w", err)
 	}
-	fmt.Printf("Saved collection %q → %s\n", slug, absPath)
-	return col, nil
+	return nil
 }
 
 // findCollectionByPath returns a pointer to the first collection whose Path
 // equals absPath, or nil if none matches.
 func findCollectionByPath(collections []config.Collection, absPath string) *config.Collection {
+	absPath = canonicalIndexPath(absPath)
 	for i := range collections {
-		if collections[i].Path == absPath {
+		if canonicalIndexPath(collections[i].Path) == absPath {
 			return &collections[i]
 		}
 	}
 	return nil
+}
+
+func resolveIndexPath(path string) (string, error) {
+	return config.CanonicalPath(path)
+}
+
+func canonicalIndexPath(path string) string {
+	canonical, err := config.CanonicalPath(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return canonical
 }
 
 // isPathArg returns true if s looks like a filesystem path rather than a collection name.
@@ -171,6 +150,12 @@ func runIndex(ctx context.Context, a *app.App, collections []config.Collection) 
 		}
 		fmt.Printf("  scanned=%d added=%d updated=%d removed=%d time=%s\n",
 			stats.FilesScanned, stats.FilesAdded, stats.FilesUpdated, stats.FilesRemoved, stats.Duration.Round(1000000))
+		if a.Embedder != nil {
+			fmt.Printf("  embedding chunks...\n")
+			if err := a.Embedder.EmbedCollection(ctx, col.Name); err != nil {
+				return fmt.Errorf("embedding collection %q: %w", col.Name, err)
+			}
+		}
 	}
 	return nil
 }

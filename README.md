@@ -59,10 +59,10 @@ qi index
 # Or index a specific path
 qi index ~/notes
 
-# Save a directory as a named collection
-qi index ~/notes --name notes
+# Collection names are generated from paths
+# ~/notes -> notes
 
-# Re-index it later by name
+# Re-index it later by generated collection name
 qi index notes
 
 # Search
@@ -83,10 +83,10 @@ qi ask "how does X work?"
 # Ask a question to a specific collection
 qi ask "how does X work?" -c notes
 
-# List all named collections
+# List all collections
 qi list
 
-# Delete a named collection and all its indexed data
+# Delete a collection and all its indexed data
 qi delete notes
 
 # Health check
@@ -98,13 +98,13 @@ qi doctor
 | Command | Description |
 |---|---|
 | `qi init` | Create config and database |
-| `qi index [path\|collection]` | Index directory (current dir by default) or named collection |
+| `qi index [path\|collection]` | Index directory (current dir by default) or collection |
 | `qi search <query>` | BM25 full-text search |
 | `qi query <query>` | Hybrid search (BM25 + vector) |
 | `qi ask <question>` | RAG-powered answer with citations |
 | `qi get <id>` | Retrieve document by 6-char hash ID |
-| `qi list` | List all named collections |
-| `qi delete <collection>` | Delete a named collection and all its indexed data |
+| `qi list` | List all collections |
+| `qi delete <collection>` | Delete a collection and all its indexed data |
 | `qi stats` | Show index statistics |
 | `qi doctor` | Health check |
 
@@ -129,7 +129,7 @@ Full documentation is in the [`docs/`](docs/) directory:
 - [`docs/architecture.md`](docs/architecture.md) — system architecture, data flows, and design decisions
 - [`docs/configuration.md`](docs/configuration.md) — all config options with explanations
 - [`docs/config.example.yaml`](docs/config.example.yaml) — fully annotated example config
-- [`docs/named-collections.md`](docs/named-collections.md) — named collections guide
+- [`docs/named-collections.md`](docs/named-collections.md) — collections guide
 
 ## Configuration
 

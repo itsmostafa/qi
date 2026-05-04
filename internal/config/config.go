@@ -10,11 +10,12 @@ import (
 )
 
 type Collection struct {
-	Name        string   `yaml:"name"`
-	Path        string   `yaml:"path"`
-	Description string   `yaml:"description,omitempty"`
-	Extensions  []string `yaml:"extensions,omitempty"`
-	Ignore      []string `yaml:"ignore,omitempty"`
+	Name         string   `yaml:"name"`
+	Path         string   `yaml:"path"`
+	Description  string   `yaml:"description,omitempty"`
+	Extensions   []string `yaml:"extensions,omitempty"`
+	Ignore       []string `yaml:"ignore,omitempty"`
+	OriginalName string   `yaml:"-"`
 }
 
 type EmbeddingProviderConfig struct {
@@ -46,13 +47,13 @@ type Providers struct {
 }
 
 type SearchConfig struct {
-	DefaultMode    string `yaml:"default_mode"`
-	BM25TopK       int    `yaml:"bm25_top_k"`
-	VectorTopK     int    `yaml:"vector_top_k"`
-	RerankTopK     int    `yaml:"rerank_top_k"`
-	RRFK           int    `yaml:"rrf_k"`
-	ChunkSize      int    `yaml:"chunk_size"`
-	ChunkOverlap   int    `yaml:"chunk_overlap"`
+	DefaultMode  string `yaml:"default_mode"`
+	BM25TopK     int    `yaml:"bm25_top_k"`
+	VectorTopK   int    `yaml:"vector_top_k"`
+	RerankTopK   int    `yaml:"rerank_top_k"`
+	RRFK         int    `yaml:"rrf_k"`
+	ChunkSize    int    `yaml:"chunk_size"`
+	ChunkOverlap int    `yaml:"chunk_overlap"`
 }
 
 type Config struct {
@@ -85,6 +86,7 @@ func Load(path string) (*Config, error) {
 
 	cfg.expandPaths()
 	cfg.resolveRelativePaths(configDir)
+	cfg.normalizeCollectionNames()
 	cfg.applyEnvOverrides()
 
 	if err := cfg.validate(); err != nil {
@@ -92,6 +94,16 @@ func Load(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func (c *Config) normalizeCollectionNames() {
+	for i := range c.Collections {
+		generated := SlugFromPath(c.Collections[i].Path)
+		if c.Collections[i].Name != "" && c.Collections[i].Name != generated {
+			c.Collections[i].OriginalName = c.Collections[i].Name
+		}
+		c.Collections[i].Name = generated
+	}
 }
 
 // ExpandHome expands a leading ~ to the user home directory.
@@ -149,7 +161,7 @@ func (c *Config) resolveRelativePaths(baseDir string) {
 	}
 }
 
-// AddCollection adds or updates a named collection in the config file at configPath.
+// AddCollection adds or updates a collection in the config file at configPath.
 // Existing YAML comments and structure are preserved via yaml.Node round-trip.
 func AddCollection(configPath string, col Collection) error {
 	if configPath == "" {
@@ -169,6 +181,8 @@ func AddCollection(configPath string, col Collection) error {
 		return fmt.Errorf("empty config document")
 	}
 	root := doc.Content[0]
+	configDir := configFileDir(configPath)
+	col.Name = SlugFromPath(col.Path)
 
 	// Find the collections sequence node in the root mapping.
 	for i := 0; i+1 < len(root.Content); i += 2 {
@@ -176,24 +190,44 @@ func AddCollection(configPath string, col Collection) error {
 			continue
 		}
 		seq := root.Content[i+1]
-		// Update existing entry if name matches.
+		// Update an existing entry only when its canonical path matches. This
+		// lets old configs with custom names be normalized without allowing a
+		// generated-name collision to rewrite another collection's path.
 		for _, item := range seq.Content {
+			itemName := mappingValue(item, "name")
+			itemPath := mappingValue(item, "path")
+			resolvedItemPath := resolveConfigFilePath(configDir, itemPath)
+			generatedName := ""
+			if itemPath != "" {
+				generatedName = SlugFromPath(resolvedItemPath)
+			}
+			if !sameCanonicalPath(resolvedItemPath, col.Path) {
+				if itemName == col.Name || generatedName == col.Name {
+					return fmt.Errorf("collection name %q collides with existing path %q", col.Name, itemPath)
+				}
+				continue
+			}
 			for j := 0; j+1 < len(item.Content); j += 2 {
-				if item.Content[j].Value == "name" && item.Content[j+1].Value == col.Name {
-					for k := 0; k+1 < len(item.Content); k += 2 {
-						if item.Content[k].Value == "path" {
-							item.Content[k+1].Value = col.Path
-							return writeConfigNode(configPath, &doc)
-						}
-					}
-					// name found but no path key — append one
-					item.Content = append(item.Content,
-						&yaml.Node{Kind: yaml.ScalarNode, Value: "path"},
-						&yaml.Node{Kind: yaml.ScalarNode, Value: col.Path},
-					)
-					return writeConfigNode(configPath, &doc)
+				switch item.Content[j].Value {
+				case "name":
+					item.Content[j+1].Value = col.Name
+				case "path":
+					item.Content[j+1].Value = col.Path
 				}
 			}
+			if mappingValue(item, "name") == "" {
+				item.Content = append(item.Content,
+					&yaml.Node{Kind: yaml.ScalarNode, Value: "name"},
+					&yaml.Node{Kind: yaml.ScalarNode, Value: col.Name},
+				)
+			}
+			if mappingValue(item, "path") == "" {
+				item.Content = append(item.Content,
+					&yaml.Node{Kind: yaml.ScalarNode, Value: "path"},
+					&yaml.Node{Kind: yaml.ScalarNode, Value: col.Path},
+				)
+			}
+			return writeConfigNode(configPath, &doc)
 		}
 		// Not found — append new entry.
 		seq.Content = append(seq.Content, collectionToNode(col))
@@ -210,47 +244,7 @@ func AddCollection(configPath string, col Collection) error {
 	return writeConfigNode(configPath, &doc)
 }
 
-// RenameCollection changes the name of an existing collection in the config file
-// at configPath. It performs a single read-modify-write so there is no window
-// where the old entry has been deleted but the new entry has not yet been written.
-func RenameCollection(configPath, oldName, newName string) error {
-	if configPath == "" {
-		configPath = DefaultConfigPath()
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return fmt.Errorf("reading config: %w", err)
-	}
-
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return fmt.Errorf("parsing config: %w", err)
-	}
-	if len(doc.Content) == 0 {
-		return fmt.Errorf("empty config document")
-	}
-	root := doc.Content[0]
-
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		if root.Content[i].Value != "collections" {
-			continue
-		}
-		seq := root.Content[i+1]
-		for _, item := range seq.Content {
-			for j := 0; j+1 < len(item.Content); j += 2 {
-				if item.Content[j].Value == "name" && item.Content[j+1].Value == oldName {
-					item.Content[j+1].Value = newName
-					return writeConfigNode(configPath, &doc)
-				}
-			}
-		}
-		return fmt.Errorf("collection %q not found in config", oldName)
-	}
-	return fmt.Errorf("collection %q not found in config", oldName)
-}
-
-// RemoveCollection removes a named collection from the config file at configPath.
+// RemoveCollection removes a collection from the config file at configPath.
 // Existing YAML comments and structure are preserved via yaml.Node round-trip.
 // Returns an error if the collection name is not found.
 func RemoveCollection(configPath string, name string) error {
@@ -271,23 +265,62 @@ func RemoveCollection(configPath string, name string) error {
 		return fmt.Errorf("empty config document")
 	}
 	root := doc.Content[0]
+	configDir := configFileDir(configPath)
 
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		if root.Content[i].Value != "collections" {
 			continue
 		}
 		seq := root.Content[i+1]
+		exactIndex := -1
+		exactMatches := 0
+		legacyIndex := -1
+		legacyMatches := 0
 		for j, item := range seq.Content {
-			for k := 0; k+1 < len(item.Content); k += 2 {
-				if item.Content[k].Value == "name" && item.Content[k+1].Value == name {
-					seq.Content = append(seq.Content[:j], seq.Content[j+1:]...)
-					return writeConfigNode(configPath, &doc)
-				}
+			itemName := mappingValue(item, "name")
+			itemPath := mappingValue(item, "path")
+			generatedName := ""
+			if itemPath != "" {
+				generatedName = SlugFromPath(resolveConfigFilePath(configDir, itemPath))
 			}
+			if generatedName == name {
+				exactIndex = j
+				exactMatches++
+			}
+			if itemName == name {
+				legacyIndex = j
+				legacyMatches++
+			}
+		}
+		if exactMatches > 1 {
+			return fmt.Errorf("collection %q is ambiguous in config", name)
+		}
+		if exactMatches == 1 {
+			seq.Content = append(seq.Content[:exactIndex], seq.Content[exactIndex+1:]...)
+			return writeConfigNode(configPath, &doc)
+		}
+		if legacyMatches > 1 {
+			return fmt.Errorf("collection %q is ambiguous in config", name)
+		}
+		if legacyMatches == 1 {
+			seq.Content = append(seq.Content[:legacyIndex], seq.Content[legacyIndex+1:]...)
+			return writeConfigNode(configPath, &doc)
 		}
 		return fmt.Errorf("collection %q not found in config", name)
 	}
 	return fmt.Errorf("collection %q not found in config", name)
+}
+
+func mappingValue(node *yaml.Node, key string) string {
+	if node == nil {
+		return ""
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1].Value
+		}
+	}
+	return ""
 }
 
 func collectionToNode(col Collection) *yaml.Node {
@@ -332,17 +365,67 @@ func writeConfigNode(configPath string, doc *yaml.Node) error {
 
 func (c *Config) validate() error {
 	seen := map[string]bool{}
+	seenPaths := map[string]string{}
 	for _, col := range c.Collections {
-		if col.Name == "" {
-			return fmt.Errorf("collection missing name")
-		}
 		if col.Path == "" {
 			return fmt.Errorf("collection %q missing path", col.Name)
+		}
+		if col.Name == "" {
+			return fmt.Errorf("collection %q has empty generated name", col.Path)
 		}
 		if seen[col.Name] {
 			return fmt.Errorf("duplicate collection name %q", col.Name)
 		}
 		seen[col.Name] = true
+		canonical := canonicalPath(col.Path)
+		if existing, ok := seenPaths[canonical]; ok {
+			return fmt.Errorf("duplicate collection path %q used by %q and %q", col.Path, existing, col.Name)
+		}
+		seenPaths[canonical] = col.Name
 	}
 	return nil
+}
+
+func sameCanonicalPath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	return canonicalPath(ExpandHome(a)) == canonicalPath(ExpandHome(b))
+}
+
+func configFileDir(configPath string) string {
+	if abs, err := filepath.Abs(configPath); err == nil {
+		return filepath.Dir(abs)
+	}
+	return filepath.Dir(configPath)
+}
+
+func resolveConfigFilePath(baseDir, path string) string {
+	path = ExpandHome(path)
+	if path != "" && !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	return path
+}
+
+func canonicalPath(path string) string {
+	canonical, err := CanonicalPath(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return canonical
+}
+
+// CanonicalPath expands a filesystem path to an absolute, symlink-resolved,
+// clean path. Symlink resolution is best effort so nonexistent paths can still
+// be compared by their cleaned absolute form.
+func CanonicalPath(path string) (string, error) {
+	abs, err := filepath.Abs(ExpandHome(path))
+	if err != nil {
+		return "", err
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = real
+	}
+	return filepath.Clean(abs), nil
 }

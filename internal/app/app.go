@@ -16,7 +16,7 @@ type App struct {
 	Config    *config.Config
 	DB        *db.DB
 	Indexer   *indexer.Indexer
-	Embedder  *indexer.Embedder  // nil if no embedding provider configured
+	Embedder  *indexer.Embedder // nil if no embedding provider configured
 	BM25      *search.BM25
 	Vector    *search.VectorSearch
 	Hybrid    *search.Hybrid
@@ -34,6 +34,12 @@ func New(ctx context.Context, cfgPath string) (*App, error) {
 	database, err := db.Open(ctx, cfg.DatabasePath)
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)
+	}
+	for _, col := range normalizableLegacyCollections(cfg.Collections) {
+		if err := database.RenameCollectionData(ctx, col.OriginalName, col.Name, col.Path); err != nil {
+			_ = database.Close()
+			return nil, fmt.Errorf("normalizing collection %q: %w", col.Name, err)
+		}
 	}
 
 	a := &App{
@@ -65,4 +71,30 @@ func New(ctx context.Context, cfgPath string) (*App, error) {
 // Close releases all resources.
 func (a *App) Close() error {
 	return a.DB.Close()
+}
+
+func normalizableLegacyCollections(collections []config.Collection) []config.Collection {
+	currentNames := map[string]bool{}
+	legacyNameCounts := map[string]int{}
+	for _, col := range collections {
+		currentNames[col.Name] = true
+		if col.OriginalName != "" && col.OriginalName != col.Name {
+			legacyNameCounts[col.OriginalName]++
+		}
+	}
+
+	normalizable := make([]config.Collection, 0, len(collections))
+	for _, col := range collections {
+		if col.OriginalName == "" || col.OriginalName == col.Name {
+			continue
+		}
+		if legacyNameCounts[col.OriginalName] > 1 {
+			continue
+		}
+		if currentNames[col.OriginalName] {
+			continue
+		}
+		normalizable = append(normalizable, col)
+	}
+	return normalizable
 }

@@ -115,3 +115,75 @@ func (db *DB) DeleteCollection(ctx context.Context, name string) error {
 
 	return tx.Commit()
 }
+
+// RenameCollectionData merges indexed data from oldName into newName.
+func (db *DB) RenameCollectionData(ctx context.Context, oldName, newName, path string) error {
+	if oldName == "" || oldName == newName {
+		return nil
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, table := range []string{"chunk_vectors", "embeddings"} {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM `+table+` WHERE chunk_id IN (
+				SELECT c.id FROM chunks c
+				JOIN documents old ON old.id = c.doc_id
+				JOIN documents new ON new.collection = ? AND new.path = old.path
+				WHERE old.collection = ?
+			)`, newName, oldName); err != nil {
+			return fmt.Errorf("deleting duplicate %s: %w", table, err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM chunks WHERE doc_id IN (
+			SELECT old.id FROM documents old
+			JOIN documents new ON new.collection = ? AND new.path = old.path
+			WHERE old.collection = ?
+		)`, newName, oldName); err != nil {
+		return fmt.Errorf("deleting duplicate chunks: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM documents
+		WHERE collection = ?
+		  AND path IN (SELECT path FROM documents WHERE collection = ?)
+	`, oldName, newName); err != nil {
+		return fmt.Errorf("deleting duplicate documents: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE documents SET collection = ? WHERE collection = ?`, newName, oldName); err != nil {
+		return fmt.Errorf("renaming documents: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE index_runs SET collection = ? WHERE collection = ?`, newName, oldName); err != nil {
+		return fmt.Errorf("renaming index_runs: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM collections WHERE name = ?`, oldName); err != nil {
+		return fmt.Errorf("deleting old collection row: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO collections(name, path, updated_at)
+		VALUES (?, ?, datetime('now'))
+		ON CONFLICT(name) DO UPDATE SET path = excluded.path, updated_at = datetime('now')
+	`, newName, path); err != nil {
+		return fmt.Errorf("upserting collection row: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM content WHERE hash NOT IN (
+			SELECT DISTINCT content_hash FROM documents
+		)`); err != nil {
+		return fmt.Errorf("pruning orphaned content: %w", err)
+	}
+
+	return tx.Commit()
+}

@@ -101,6 +101,26 @@ func TestBM25_CollectionFilter(t *testing.T) {
 	}
 }
 
+func TestBM25_RelaxesNaturalLanguageQueryWhenStrictSearchMisses(t *testing.T) {
+	database := openTestDB(t)
+	seedTestData(t, database)
+
+	bm25 := NewBM25(database)
+	results, err := bm25.Search(context.Background(), SearchOpts{
+		Query: "What is Go? Response in one sentence.",
+		TopK:  10,
+	})
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected relaxed search to find at least one result")
+	}
+	if results[0].Title != "Go Programming" {
+		t.Fatalf("expected Go Programming first, got %q", results[0].Title)
+	}
+}
+
 func TestBM25_ExplainPopulated(t *testing.T) {
 	database := openTestDB(t)
 	seedTestData(t, database)
