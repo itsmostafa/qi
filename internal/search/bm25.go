@@ -25,7 +25,33 @@ func (b *BM25) Search(ctx context.Context, opts SearchOpts) ([]Result, error) {
 
 	// Escape FTS5 query: wrap each token in quotes to avoid syntax errors
 	ftsQuery := sanitizeFTSQuery(opts.Query)
+	results, err := b.searchFTS(ctx, opts, ftsQuery)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) > 0 {
+		return results, nil
+	}
 
+	coreQuery := sanitizeFTSQueryWithoutDirectives(opts.Query)
+	if coreQuery != "" && coreQuery != ftsQuery {
+		results, err = b.searchFTS(ctx, opts, coreQuery)
+		if err != nil {
+			return nil, err
+		}
+		if len(results) > 0 {
+			return results, nil
+		}
+	}
+
+	relaxedQuery := sanitizeFTSQueryAny(opts.Query)
+	if relaxedQuery == "" || relaxedQuery == ftsQuery {
+		return results, nil
+	}
+	return b.searchFTS(ctx, opts, relaxedQuery)
+}
+
+func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) ([]Result, error) {
 	var args []any
 	var collectionFilter string
 	if opts.Collection != "" {
@@ -102,10 +128,59 @@ var ftsStopWords = map[string]bool{
 	"not": true, "if": true, "then": true, "so": true, "up": true, "out": true,
 }
 
+var ftsDirectiveWords = map[string]bool{
+	"answer": true, "answers": true, "response": true, "respond": true,
+	"sentence": true, "sentences": true, "paragraph": true, "paragraphs": true,
+	"brief": true, "briefly": true, "concise": true, "concisely": true,
+	"short": true, "shortly": true, "summarize": true, "summary": true,
+	"one": true, "two": true, "three": true,
+}
+
 // sanitizeFTSQuery builds a safe FTS5 query from a natural-language string.
 // It strips punctuation, filters stop words, and quotes each remaining term.
 // If all terms are stop words, falls back to quoting all non-empty terms.
 func sanitizeFTSQuery(q string) string {
+	chosen := ftsQueryTerms(q)
+
+	quoted := make([]string, 0, len(chosen))
+	for _, t := range chosen {
+		t = strings.ReplaceAll(t, `"`, `""`)
+		quoted = append(quoted, `"`+t+`"`)
+	}
+	return strings.Join(quoted, " ")
+}
+
+func sanitizeFTSQueryWithoutDirectives(q string) string {
+	chosen := ftsQueryTermsWithoutDirectives(q)
+
+	quoted := make([]string, 0, len(chosen))
+	for _, t := range chosen {
+		t = strings.ReplaceAll(t, `"`, `""`)
+		quoted = append(quoted, `"`+t+`"`)
+	}
+	return strings.Join(quoted, " ")
+}
+
+func sanitizeFTSQueryAny(q string) string {
+	chosen := ftsQueryTermsWithoutDirectives(q)
+
+	quoted := make([]string, 0, len(chosen))
+	for _, t := range chosen {
+		t = strings.ReplaceAll(t, `"`, `""`)
+		quoted = append(quoted, `"`+t+`"`)
+	}
+	return strings.Join(quoted, " OR ")
+}
+
+func ftsQueryTerms(q string) []string {
+	return ftsQueryTermsFiltered(q, false)
+}
+
+func ftsQueryTermsWithoutDirectives(q string) []string {
+	return ftsQueryTermsFiltered(q, true)
+}
+
+func ftsQueryTermsFiltered(q string, dropDirectives bool) []string {
 	terms := strings.Fields(q)
 
 	stripPunct := func(t string) string {
@@ -124,7 +199,8 @@ func sanitizeFTSQuery(q string) string {
 			continue
 		}
 		all = append(all, c)
-		if !ftsStopWords[strings.ToLower(c)] {
+		lower := strings.ToLower(c)
+		if !ftsStopWords[lower] && (!dropDirectives || !ftsDirectiveWords[lower]) {
 			meaningful = append(meaningful, c)
 		}
 	}
@@ -134,10 +210,5 @@ func sanitizeFTSQuery(q string) string {
 		chosen = all
 	}
 
-	quoted := make([]string, 0, len(chosen))
-	for _, t := range chosen {
-		t = strings.ReplaceAll(t, `"`, `""`)
-		quoted = append(quoted, `"`+t+`"`)
-	}
-	return strings.Join(quoted, " ")
+	return chosen
 }
