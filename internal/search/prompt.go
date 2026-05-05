@@ -7,8 +7,8 @@ import (
 
 const systemPromptTemplate = `You are a knowledgeable assistant with access to a curated knowledge base.
 Answer the user's question using only the provided context. If the context doesn't contain enough information to answer, say so clearly.
-Cite your sources using the qi:// URIs provided with each context passage.
-Format citations inline like: [qi://collection/path].`
+Cite your sources using the numeric citation marker shown before each context passage.
+Format citations inline like: [1] or [1, 2].`
 
 // BuildPrompt constructs a RAG prompt from search results.
 func BuildPrompt(question string, results []Result) (systemPrompt, userPrompt string) {

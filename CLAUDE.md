@@ -23,20 +23,23 @@ Always run `task check` before finishing any code change to ensure all checks pa
 - **Content-addressable storage**: `content` table keyed by SHA-256 hash; `documents` references by hash. Enables deduplication and O(1) change detection.
 - **Break-point chunker**: Scores chunk boundaries by type (heading=100, code fence=80, blank line=20) with distance decay from target size.
 - **Graceful degradation**: Vector search and generation are optional — BM25 always works.
+- **Auto-generated collection names**: Collection names are derived from full path segments (e.g. `~/Projects/tools/qi` → `tools-qi`). The `--name` flag was removed from `index`; use the derived slug or configure an alias. Legacy names are normalized on startup.
+- **Query relaxation**: BM25 search automatically falls back from conjunctive to disjunctive matching for natural-language queries that return zero results.
+- **Auto-embed on index**: When an embedder is configured, chunks are embedded immediately after indexing without a separate step.
 - **Config**: Raw `gopkg.in/yaml.v3`, no viper. `~` expansion + relative path resolution.
 
 ## Package Structure
 
 ```
-cmd/                  Cobra commands (root, init, index, search, query, ask, get, doctor, stats)
+cmd/                  Cobra commands (root, init, index, search, query, ask, get, doctor, stats, list, update)
 internal/
   app/                Wires config + db + services
   config/             Config loading, defaults, path expansion
   db/                 SQLite open/migrate/WAL, embedding blob storage
-    migrations/       Embedded SQL migrations (001_init.sql)
+    migrations/       Embedded SQL migrations (001_init.sql, 002_add_chunk_vectors.sql, 003_cascade_chunk_refs.sql)
   chunker/            Break-point chunker (chunker.Chunker interface)
   indexer/            Filesystem walker, SHA-256 change detection, embedder
-  output/             Text/JSON/Markdown formatters
+  output/             Text/JSON formatters (ask results, generic formatter)
   parser/             Document parsers (Markdown via goldmark, plaintext, source)
   providers/          HTTP adapters for embedding, rerank, generation APIs
   search/             BM25, vector KNN, RRF fusion, hybrid, ask, cache, prompt
@@ -55,7 +58,7 @@ Tests use real in-memory SQLite (no mocking). Provider tests use `httptest.NewSe
 
 ## Adding a New Migration
 
-Add `internal/db/migrations/00N_description.sql` — the runner applies them in alphabetical order.
+Add `internal/db/migrations/00N_description.sql` — the runner applies them in alphabetical order. Current migrations: `001_init.sql`, `002_add_chunk_vectors.sql`, `003_cascade_chunk_refs.sql`.
 
 ## sqlite-vec Note
 
