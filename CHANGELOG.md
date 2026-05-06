@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.0](https://github.com/itsmostafa/qi/compare/v0.7.0...v0.8.0) (2026-05-06)
+
+
+### Features
+
+* **output:** add ask result formatter with JSON support ([3f68286](https://github.com/itsmostafa/qi/commit/3f68286f5b1722beb8d852c085188acd6f51d984))
+* **output:** add ask result formatter with JSON support ([d35ced9](https://github.com/itsmostafa/qi/commit/d35ced909d2ea0eaa2fb6c9c3f3e3e4a2bd0c0a7))
+* **output:** track all chunk indices per source and add markdown format ([4fe81c5](https://github.com/itsmostafa/qi/commit/4fe81c506956cd686072b2edf77f3f6e3870fb5e))
+* **search:** switch system prompt citations from qi:// URIs to numeric markers ([a022665](https://github.com/itsmostafa/qi/commit/a0226657a05f3349b288c0285d07c9a1033d906c))
+
+
+### Bug Fixes
+
+* **formula:** correct homebrew test to use --version flag ([c3d1741](https://github.com/itsmostafa/qi/commit/c3d17413adaca0a1b9d5685df9dbbeef5bd4d580))
+
 ## [0.7.0](https://github.com/itsmostafa/qi/compare/v0.6.0...v0.7.0) (2026-05-04)
 
 
