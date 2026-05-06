@@ -19,6 +19,6 @@ class Qi < Formula
   end
 
   test do
-    assert_match "v#{version}", shell_output("#{bin}/qi version")
+    assert_match "v#{version}", shell_output("#{bin}/qi --version")
   end
 end
