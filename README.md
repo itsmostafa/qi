@@ -11,10 +11,15 @@
 Save tokens by delegating some of your AI Agent's work to qi.
 
 ⚡ Ultra-fast indexing
+
 ⚡ Lower tokens + latency
+
 🧠 Better reasoning (agents focus on thinking, not retrieval)
+
 🔒 Fully local + offline
+
 🧩 Works with Ollama, LM Studio, Claude, OpenAI, MLX, etc.
+
 
 ## Features
 
