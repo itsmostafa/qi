@@ -8,17 +8,13 @@
   <img src="assets/img/qi-logo.png" alt="qi logo" width="200" />
 </p>
 
-Save tokens by delegating some of your AI Agent's work to qi.
+Save tokens by delegating some of your AI Agent's work to qi. Agent skills included.
 
-⚡ Ultra-fast indexing
-
-⚡ Lower tokens + latency
-
-🧠 Better reasoning (agents focus on thinking, not retrieval)
-
-🔒 Fully local + offline
-
-🧩 Works with Ollama, LM Studio, Claude, OpenAI, MLX, etc.
+- ⚡ Ultra-fast indexing
+- ⚡ Lower tokens + latency
+- 🧠 Better reasoning (agents focus on thinking, not retrieval)
+- 🔒 Fully local + offline
+- 🧩 Works with Ollama, LM Studio, Claude, OpenAI, MLX, etc.
 
 
 ## Features
