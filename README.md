@@ -8,9 +8,14 @@
   <img src="assets/img/qi-logo.png" alt="qi logo" width="200" />
 </p>
 
-qi is an ultra-fast knowledge search CLI for your files on your local machine. No dependencies, no runtime, just a single executable that indexes code, docs, notes, papers, logs, and other text into SQLite, then gives you BM25 search, optional vector search, and grounded LLM Q&A with citations. Use it offline with Ollama, LM Studio, llama.cpp, or MLX, or connect OpenAI for cloud models.
+Save tokens by delegating some of your AI Agent's work to qi. Agent skills included.
 
-Save tokens by delegating some of your AI Agent's work to qi.
+- ⚡ Ultra-fast indexing
+- ⚡ Lower tokens + latency
+- 🧠 Better reasoning (agents focus on thinking, not retrieval)
+- 🔒 Fully local + offline
+- 🧩 Works with Ollama, LM Studio, Claude, OpenAI, MLX, etc.
+
 
 ## Features
 
