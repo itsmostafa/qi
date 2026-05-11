@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/itsmostafa/qi/internal/config"
@@ -75,7 +74,7 @@ func (p *embeddingProvider) embedBatch(ctx context.Context, texts []string) ([][
 		return nil, err
 	}
 
-	url := strings.TrimRight(p.cfg.BaseURL, "/") + "/v1/embeddings"
+	url := apiBase(p.cfg.BaseURL, "/v1/embeddings")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err

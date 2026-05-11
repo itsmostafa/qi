@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/itsmostafa/qi/internal/config"
@@ -53,7 +52,7 @@ func (p *rerankProvider) Rerank(ctx context.Context, query string, passages []st
 		return nil, err
 	}
 
-	url := strings.TrimRight(p.cfg.BaseURL, "/") + "/v1/rerank"
+	url := apiBase(p.cfg.BaseURL, "/v1/rerank")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err

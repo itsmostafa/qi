@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/itsmostafa/qi/internal/config"
@@ -63,7 +62,7 @@ func (p *generationProvider) Complete(ctx context.Context, req CompletionRequest
 		return "", err
 	}
 
-	url := strings.TrimRight(p.cfg.BaseURL, "/") + "/v1/chat/completions"
+	url := apiBase(p.cfg.BaseURL, "/v1/chat/completions")
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return "", err
