@@ -19,12 +19,13 @@ type Collection struct {
 }
 
 type EmbeddingProviderConfig struct {
-	Name      string `yaml:"name"`
-	BaseURL   string `yaml:"base_url"`
-	APIKey    string `yaml:"api_key,omitempty"`
-	Model     string `yaml:"model"`
-	Dimension int    `yaml:"dimension"`
-	BatchSize int    `yaml:"batch_size,omitempty"`
+	Name          string `yaml:"name"`
+	BaseURL       string `yaml:"base_url"`
+	APIKey        string `yaml:"api_key,omitempty"`
+	Model         string `yaml:"model"`
+	Dimension     int    `yaml:"dimension"`
+	BatchSize     int    `yaml:"batch_size,omitempty"`
+	MaxInputChars int    `yaml:"max_input_chars,omitempty"`
 }
 
 type RerankProviderConfig struct {
@@ -135,6 +136,9 @@ func (c *Config) expandEnvVars() {
 	if gen := c.Providers.Generation; gen != nil {
 		gen.APIKey = os.ExpandEnv(gen.APIKey)
 		gen.BaseURL = os.ExpandEnv(gen.BaseURL)
+	}
+	if rer := c.Providers.Rerank; rer != nil {
+		rer.BaseURL = os.ExpandEnv(rer.BaseURL)
 	}
 }
 
