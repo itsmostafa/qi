@@ -66,6 +66,34 @@ func TestBreakpointChunker_SequenceNumbers(t *testing.T) {
 	}
 }
 
+func TestBreakpointChunker_OversizedSingleLine(t *testing.T) {
+	c := NewBreakpointChunker(64)
+	// Single line 4x longer than target — simulates a minified file with no newlines.
+	longLine := strings.Repeat("x", 256)
+	doc := &parser.Document{
+		Sections: []parser.Section{
+			{Text: longLine, HeadingPath: "file.min.js"},
+		},
+	}
+	chunks := c.Chunk(doc)
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks for oversized single line, got %d", len(chunks))
+	}
+	for _, ch := range chunks {
+		if len([]rune(ch.Text)) > 64 {
+			t.Errorf("chunk exceeds target size: %d runes", len([]rune(ch.Text)))
+		}
+	}
+	// Reassemble and verify no content is lost.
+	var sb strings.Builder
+	for _, ch := range chunks {
+		sb.WriteString(ch.Text)
+	}
+	if sb.String() != longLine {
+		t.Errorf("reassembled text does not match original")
+	}
+}
+
 func TestBreakpointChunker_PreservesHeadingPath(t *testing.T) {
 	c := NewBreakpointChunker(256)
 	doc := &parser.Document{
