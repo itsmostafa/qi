@@ -19,12 +19,13 @@ type Collection struct {
 }
 
 type EmbeddingProviderConfig struct {
-	Name      string `yaml:"name"`
-	BaseURL   string `yaml:"base_url"`
-	APIKey    string `yaml:"api_key,omitempty"`
-	Model     string `yaml:"model"`
-	Dimension int    `yaml:"dimension"`
-	BatchSize int    `yaml:"batch_size,omitempty"`
+	Name          string `yaml:"name"`
+	BaseURL       string `yaml:"base_url"`
+	APIKey        string `yaml:"api_key,omitempty"`
+	Model         string `yaml:"model"`
+	Dimension     int    `yaml:"dimension"`
+	BatchSize     int    `yaml:"batch_size,omitempty"`
+	MaxInputChars int    `yaml:"max_input_chars,omitempty"`
 }
 
 type RerankProviderConfig struct {
@@ -47,13 +48,15 @@ type Providers struct {
 }
 
 type SearchConfig struct {
-	DefaultMode  string `yaml:"default_mode"`
-	BM25TopK     int    `yaml:"bm25_top_k"`
-	VectorTopK   int    `yaml:"vector_top_k"`
-	RerankTopK   int    `yaml:"rerank_top_k"`
-	RRFK         int    `yaml:"rrf_k"`
-	ChunkSize    int    `yaml:"chunk_size"`
-	ChunkOverlap int    `yaml:"chunk_overlap"`
+	DefaultMode        string   `yaml:"default_mode"`
+	BM25TopK           int      `yaml:"bm25_top_k"`
+	VectorTopK         int      `yaml:"vector_top_k"`
+	RerankTopK         int      `yaml:"rerank_top_k"`
+	RRFK               int      `yaml:"rrf_k"`
+	ChunkSize          int      `yaml:"chunk_size"`
+	ChunkOverlap       int      `yaml:"chunk_overlap"`
+	PreferExtensions   []string `yaml:"prefer_extensions,omitempty"`
+	ExtensionBoost     float64  `yaml:"extension_boost,omitempty"`
 }
 
 type Config struct {
@@ -85,6 +88,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.expandPaths()
+	cfg.expandEnvVars()
 	cfg.resolveRelativePaths(configDir)
 	cfg.normalizeCollectionNames()
 	cfg.applyEnvOverrides()
@@ -122,6 +126,21 @@ func (c *Config) expandPaths() {
 	c.DatabasePath = ExpandHome(c.DatabasePath)
 	for i := range c.Collections {
 		c.Collections[i].Path = ExpandHome(c.Collections[i].Path)
+	}
+}
+
+// expandEnvVars expands ${VAR} references in provider api_key and base_url fields.
+func (c *Config) expandEnvVars() {
+	if emb := c.Providers.Embedding; emb != nil {
+		emb.APIKey = os.ExpandEnv(emb.APIKey)
+		emb.BaseURL = os.ExpandEnv(emb.BaseURL)
+	}
+	if gen := c.Providers.Generation; gen != nil {
+		gen.APIKey = os.ExpandEnv(gen.APIKey)
+		gen.BaseURL = os.ExpandEnv(gen.BaseURL)
+	}
+	if rer := c.Providers.Rerank; rer != nil {
+		rer.BaseURL = os.ExpandEnv(rer.BaseURL)
 	}
 }
 

@@ -1,5 +1,36 @@
 package search
 
+import (
+	"path/filepath"
+	"strings"
+)
+
+// applyExtensionBoost multiplies scores for results whose file extension is in
+// the preferred set, then re-sorts. boost==0 uses a default of 2.0.
+func applyExtensionBoost(results []Result, exts []string, boost float64) []Result {
+	if len(exts) == 0 {
+		return results
+	}
+	if boost <= 0 {
+		boost = 2.0
+	}
+	set := make(map[string]bool, len(exts))
+	for _, e := range exts {
+		if !strings.HasPrefix(e, ".") {
+			e = "." + e
+		}
+		set[strings.ToLower(e)] = true
+	}
+	for i := range results {
+		ext := strings.ToLower(filepath.Ext(results[i].Path))
+		if set[ext] {
+			results[i].Score *= boost
+		}
+	}
+	sortByScore(results)
+	return results
+}
+
 // ReciprocalRankFusion merges BM25 and vector result lists using RRF.
 // k is the rank constant (default 60 per the paper).
 // Returns results sorted by descending RRF score.

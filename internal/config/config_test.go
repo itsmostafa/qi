@@ -232,6 +232,30 @@ providers:
 	}
 }
 
+func TestLoad_Rerank_EnvBaseURL(t *testing.T) {
+	t.Setenv("RERANK_BASE_URL", "http://reranker.local:8080")
+	path := writeTempConfig(t, `
+collections:
+  - name: docs
+    path: /tmp
+providers:
+  rerank:
+    name: jina
+    base_url: ${RERANK_BASE_URL}
+    model: jina-reranker-v2-base-multilingual
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Providers.Rerank == nil {
+		t.Fatal("expected rerank provider")
+	}
+	if cfg.Providers.Rerank.BaseURL != "http://reranker.local:8080" {
+		t.Errorf("expected expanded base_url, got %q", cfg.Providers.Rerank.BaseURL)
+	}
+}
+
 func TestAddCollectionNormalizesSamePathLegacyName(t *testing.T) {
 	dir := t.TempDir()
 	collectionPath := filepath.Join(dir, "foo bar")

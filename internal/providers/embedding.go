@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/itsmostafa/qi/internal/config"
@@ -49,6 +49,22 @@ func (p *embeddingProvider) Embed(ctx context.Context, texts []string) ([][]floa
 		batchSize = 32
 	}
 
+	// Truncate any texts that exceed the per-text rune limit.
+	if p.cfg.MaxInputChars > 0 {
+		truncated := make([]string, len(texts))
+		for i, t := range texts {
+			runes := []rune(t)
+			if len(runes) > p.cfg.MaxInputChars {
+				slog.Warn("truncating oversized text for embedding",
+					"chars", len(runes), "max", p.cfg.MaxInputChars)
+				truncated[i] = string(runes[:p.cfg.MaxInputChars])
+			} else {
+				truncated[i] = t
+			}
+		}
+		texts = truncated
+	}
+
 	var all [][]float32
 	for i := 0; i < len(texts); i += batchSize {
 		end := i + batchSize
@@ -75,7 +91,7 @@ func (p *embeddingProvider) embedBatch(ctx context.Context, texts []string) ([][
 		return nil, err
 	}
 
-	url := strings.TrimRight(p.cfg.BaseURL, "/") + "/v1/embeddings"
+	url := apiBase(p.cfg.BaseURL, "/v1/embeddings")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err

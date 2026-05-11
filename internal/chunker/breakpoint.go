@@ -72,7 +72,39 @@ func (c *BreakpointChunker) chunkSection(section parser.Section, startSeq int) [
 	size := 0
 
 	for i, line := range lines {
-		size += runeLen(line) + 1 // +1 for newline
+		lineLen := runeLen(line)
+
+		// Force-split lines that individually exceed target size (e.g. minified files).
+		if lineLen > c.TargetSize {
+			if i > start {
+				text := strings.Join(lines[start:i], "\n")
+				text = strings.TrimRightFunc(text, unicode.IsSpace)
+				if text != "" {
+					chunks = append(chunks, Chunk{
+						Seq: seq, Text: text,
+						HeadingPath: section.HeadingPath, Ordinal: section.Ordinal,
+					})
+					seq++
+				}
+			}
+			runes := []rune(line)
+			for offset := 0; offset < len(runes); offset += c.TargetSize {
+				end := offset + c.TargetSize
+				if end > len(runes) {
+					end = len(runes)
+				}
+				chunks = append(chunks, Chunk{
+					Seq: seq, Text: string(runes[offset:end]),
+					HeadingPath: section.HeadingPath, Ordinal: section.Ordinal,
+				})
+				seq++
+			}
+			start = i + 1
+			size = 0
+			continue
+		}
+
+		size += lineLen + 1 // +1 for newline
 
 		if size < c.MinSize {
 			continue
