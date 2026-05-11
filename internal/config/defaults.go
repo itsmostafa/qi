@@ -103,6 +103,7 @@ providers:
   #   model: nomic-embed-text
   #   dimension: 768
   #   batch_size: 32
+  #   max_input_chars: 24000  # safety net: truncate texts over ~6k tokens (set for 8k-token models)
 
   # Or use OpenAI embeddings — set OPENAI_API_KEY in your environment
   # embedding:
@@ -129,4 +130,6 @@ search:
   rrf_k: 60
   chunk_size: 512
   chunk_overlap: 64
+  # prefer_extensions: [.md, .txt]  # boost scores for these file types
+  # extension_boost: 2.0            # multiplier applied to preferred extensions (default 2.0)
 `
