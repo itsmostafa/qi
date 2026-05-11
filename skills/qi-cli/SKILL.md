@@ -37,7 +37,7 @@ qi init
 ```
 
 ### `qi index [path|collection]`
-Indexes documents. SHA-256 content hashing means unchanged files are skipped.
+Indexes documents. SHA-256 content hashing means unchanged files are skipped. Embeddings are generated at index time — if you add an embedding provider to config after an initial index run, re-run `qi index` to populate the missing embeddings.
 
 ```bash
 qi index                              # indexes current working directory
@@ -102,10 +102,10 @@ qi delete notes
 ```
 
 ### `qi stats`
-Show document counts, chunk counts, embedding counts, and database size per collection.
+Show document counts, chunk counts, embedding counts, and database size per collection. If `Embeddings` count is much lower than `Chunks` count, vector search has no data to work with — re-run `qi index`.
 
 ### `qi doctor`
-Health-check config, database, collection paths, and provider connectivity.
+Health-check config, database, collection paths, and provider connectivity. If the embedding provider shows `SKIP` instead of `OK`, `qi query` will silently fall back to BM25 regardless of your config.
 
 ### `qi update`
 Update the binary from GitHub. If installed via Homebrew, it suggests `brew upgrade qi` instead.
@@ -259,3 +259,44 @@ qi stats                          # see document/chunk/embedding counts
 qi query "question" --explain     # see score breakdown
 qi get abc123                     # read the full source document
 ```
+
+---
+
+## Troubleshooting
+
+### `qi query` returns keyword-only results despite embedding provider being configured
+
+Work through these steps in order:
+
+**1. Check if the provider is actually wired up**
+```bash
+qi doctor
+```
+Look for `OK` next to the embedding provider. `SKIP` means qi didn't parse the provider config — common causes: wrong YAML key name (`embedding` not `embeddings`), missing `dimension` field, or bad indentation (must be under `providers:`).
+
+**2. Check if embeddings were actually generated**
+```bash
+qi stats
+```
+If `Embeddings` is 0 or far less than `Chunks`, the vectors were never written. This happens when the embedding provider was added to config *after* the initial `qi index` run — re-index to fix it:
+```bash
+qi index <collection-name>
+```
+Only chunks missing embeddings are re-processed; unchanged files aren't re-parsed.
+
+**3. Verify the provider is reachable at query time**
+`qi query` embeds the query string at runtime. If the provider is down, qi silently falls back to BM25 without an error. Test connectivity:
+```bash
+# Ollama:
+curl http://localhost:11434/v1/embeddings -H "Content-Type: application/json" \
+  -d '{"model":"nomic-embed-text","input":["test"]}'
+```
+Also confirm the model is pulled: `ollama list`.
+
+**4. Use `--explain` to see what's actually happening**
+```bash
+qi query "your question" --explain
+```
+This shows each result's BM25 rank, vector rank, and fused RRF score. If every result is missing a vector rank, the vector path isn't contributing — confirming one of the issues above.
+
+**Note:** hybrid mode also skips vector search if the top BM25 score is more than 3× the second result (intentional optimization for dominant keyword matches). If your queries are exact keyword matches, try a more paraphrased, natural-language query to avoid this shortcut.
