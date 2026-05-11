@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -46,6 +47,22 @@ func (p *embeddingProvider) Embed(ctx context.Context, texts []string) ([][]floa
 	batchSize := p.cfg.BatchSize
 	if batchSize <= 0 {
 		batchSize = 32
+	}
+
+	// Truncate any texts that exceed the per-text rune limit.
+	if p.cfg.MaxInputChars > 0 {
+		truncated := make([]string, len(texts))
+		for i, t := range texts {
+			runes := []rune(t)
+			if len(runes) > p.cfg.MaxInputChars {
+				slog.Warn("truncating oversized text for embedding",
+					"chars", len(runes), "max", p.cfg.MaxInputChars)
+				truncated[i] = string(runes[:p.cfg.MaxInputChars])
+			} else {
+				truncated[i] = t
+			}
+		}
+		texts = truncated
 	}
 
 	var all [][]float32
