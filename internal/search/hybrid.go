@@ -40,6 +40,9 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 		return nil, fmt.Errorf("bm25 search: %w", err)
 	}
 
+	preferExts := h.cfg.PreferExtensions
+	extBoost := h.cfg.ExtensionBoost
+
 	// Strong-signal shortcut: if top BM25 score is >> #2, skip vector search
 	if len(bm25Results) >= 2 && h.embedding != nil {
 		topScore := bm25Results[0].Score
@@ -50,7 +53,7 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 			if opts.TopK > 0 && len(bm25Results) > opts.TopK {
 				bm25Results = bm25Results[:opts.TopK]
 			}
-			return bm25Results, nil
+			return applyExtensionBoost(bm25Results, preferExts, extBoost), nil
 		}
 	}
 
@@ -60,7 +63,7 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 		if opts.TopK > 0 && len(bm25Results) > opts.TopK {
 			bm25Results = bm25Results[:opts.TopK]
 		}
-		return bm25Results, nil
+		return applyExtensionBoost(bm25Results, preferExts, extBoost), nil
 	}
 
 	// Embed the query
@@ -70,7 +73,7 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 		if opts.TopK > 0 && len(bm25Results) > opts.TopK {
 			bm25Results = bm25Results[:opts.TopK]
 		}
-		return bm25Results, nil
+		return applyExtensionBoost(bm25Results, preferExts, extBoost), nil
 	}
 	queryVec := embeddings[0]
 
@@ -85,7 +88,7 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 		if opts.TopK > 0 && len(bm25Results) > opts.TopK {
 			bm25Results = bm25Results[:opts.TopK]
 		}
-		return bm25Results, nil
+		return applyExtensionBoost(bm25Results, preferExts, extBoost), nil
 	}
 
 	// RRF fusion
@@ -109,5 +112,5 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 		fused = fused[:topK]
 	}
 
-	return fused, nil
+	return applyExtensionBoost(fused, preferExts, extBoost), nil
 }

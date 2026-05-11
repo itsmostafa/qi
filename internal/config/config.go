@@ -48,13 +48,15 @@ type Providers struct {
 }
 
 type SearchConfig struct {
-	DefaultMode  string `yaml:"default_mode"`
-	BM25TopK     int    `yaml:"bm25_top_k"`
-	VectorTopK   int    `yaml:"vector_top_k"`
-	RerankTopK   int    `yaml:"rerank_top_k"`
-	RRFK         int    `yaml:"rrf_k"`
-	ChunkSize    int    `yaml:"chunk_size"`
-	ChunkOverlap int    `yaml:"chunk_overlap"`
+	DefaultMode        string   `yaml:"default_mode"`
+	BM25TopK           int      `yaml:"bm25_top_k"`
+	VectorTopK         int      `yaml:"vector_top_k"`
+	RerankTopK         int      `yaml:"rerank_top_k"`
+	RRFK               int      `yaml:"rrf_k"`
+	ChunkSize          int      `yaml:"chunk_size"`
+	ChunkOverlap       int      `yaml:"chunk_overlap"`
+	PreferExtensions   []string `yaml:"prefer_extensions,omitempty"`
+	ExtensionBoost     float64  `yaml:"extension_boost,omitempty"`
 }
 
 type Config struct {

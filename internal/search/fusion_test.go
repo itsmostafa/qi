@@ -8,6 +8,45 @@ func makeResult(chunkID int64, score float64) Result {
 	return Result{ChunkID: chunkID, DocID: chunkID, Score: score}
 }
 
+func makeResultPath(chunkID int64, score float64, path string) Result {
+	return Result{ChunkID: chunkID, DocID: chunkID, Score: score, Path: path}
+}
+
+func TestApplyExtensionBoost_PreferredMovesUp(t *testing.T) {
+	results := []Result{
+		makeResultPath(1, 1.0, "file.go"),
+		makeResultPath(2, 0.9, "README.md"),
+		makeResultPath(3, 0.8, "notes.txt"),
+	}
+	boosted := applyExtensionBoost(results, []string{".md", ".txt"}, 2.0)
+	if boosted[0].ChunkID != 2 {
+		t.Errorf("expected README.md first after boost, got chunk %d", boosted[0].ChunkID)
+	}
+	if boosted[1].ChunkID != 3 {
+		t.Errorf("expected notes.txt second, got chunk %d", boosted[1].ChunkID)
+	}
+}
+
+func TestApplyExtensionBoost_NoExts(t *testing.T) {
+	results := []Result{makeResultPath(1, 1.0, "a.go"), makeResultPath(2, 0.5, "b.md")}
+	out := applyExtensionBoost(results, nil, 2.0)
+	if out[0].ChunkID != 1 {
+		t.Errorf("order should be unchanged with no preferred exts")
+	}
+}
+
+func TestApplyExtensionBoost_DefaultBoost(t *testing.T) {
+	results := []Result{
+		makeResultPath(1, 1.0, "file.go"),
+		makeResultPath(2, 0.9, "doc.md"),
+	}
+	// boost=0 should use default 2.0
+	boosted := applyExtensionBoost(results, []string{".md"}, 0)
+	if boosted[0].ChunkID != 2 {
+		t.Errorf("expected doc.md first with default 2x boost, got chunk %d", boosted[0].ChunkID)
+	}
+}
+
 func TestRRF_EmptyLists(t *testing.T) {
 	result := ReciprocalRankFusion(nil, nil, 60)
 	if len(result) != 0 {
