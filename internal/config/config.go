@@ -85,6 +85,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.expandPaths()
+	cfg.expandEnvVars()
 	cfg.resolveRelativePaths(configDir)
 	cfg.normalizeCollectionNames()
 	cfg.applyEnvOverrides()
@@ -122,6 +123,18 @@ func (c *Config) expandPaths() {
 	c.DatabasePath = ExpandHome(c.DatabasePath)
 	for i := range c.Collections {
 		c.Collections[i].Path = ExpandHome(c.Collections[i].Path)
+	}
+}
+
+// expandEnvVars expands ${VAR} references in provider api_key and base_url fields.
+func (c *Config) expandEnvVars() {
+	if emb := c.Providers.Embedding; emb != nil {
+		emb.APIKey = os.ExpandEnv(emb.APIKey)
+		emb.BaseURL = os.ExpandEnv(emb.BaseURL)
+	}
+	if gen := c.Providers.Generation; gen != nil {
+		gen.APIKey = os.ExpandEnv(gen.APIKey)
+		gen.BaseURL = os.ExpandEnv(gen.BaseURL)
 	}
 }
 
