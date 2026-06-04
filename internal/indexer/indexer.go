@@ -38,8 +38,6 @@ var defaultIgnoreDirs = map[string]bool{
 var defaultExtensions = map[string]bool{
 	".md": true, ".markdown": true,
 	".txt": true, ".text": true,
-	".go": true, ".ts": true, ".tsx": true, ".js": true, ".jsx": true,
-	".py": true, ".rs": true,
 }
 
 // Stats summarises an index run.

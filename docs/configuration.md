@@ -35,7 +35,7 @@ collections:
   - name: notes
     path: ~/notes
     description: Personal notes       # optional
-    extensions: [.md, .txt]           # optional — defaults cover common text/code types
+    extensions: [.md, .txt]           # optional — omit to use text defaults (.md, .markdown, .txt, .text)
     ignore: [.git, node_modules]      # optional
 ```
 
@@ -44,7 +44,7 @@ collections:
 | `name` | no | Generated identifier used in search output and CLI flags; filled from `path` if omitted |
 | `path` | yes | Directory to index; supports `~` and relative paths |
 | `description` | no | Human-readable label |
-| `extensions` | no | File extensions to index; omit to use built-in defaults (`.md .txt .go .ts .py` …) |
+| `extensions` | no | File extensions to index; omit to use built-in defaults (`.md .markdown .txt .text`) |
 | `ignore` | no | Directory/file names to skip during indexing |
 
 Collection names are derived from paths, for example `/Users/alice/Projects/tools/qi` becomes `Projects-tools-qi`. Duplicate generated names or duplicate canonical paths are rejected at startup.

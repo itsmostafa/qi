@@ -12,7 +12,7 @@ Indexing is fast because qi only processes what has changed. Every file is finge
 
 For new or changed files, qi runs a three-stage pipeline:
 
-1. **Parse** — files are broken into sections by structure. Markdown splits at headings; plaintext and source code are treated as a single section. Parsers are registered by extension, so adding a new format is one file and one function call — nothing else changes.
+1. **Parse** — files are broken into sections by structure. Markdown splits at headings; plaintext files are treated as a single section. Parsers are registered by extension, so adding a new format is one file and one function call — nothing else changes.
 
 2. **Chunk** — sections are split into chunks using a break-point scorer that understands document structure. Headings score 100, code fences 80, blank lines 20 — with a distance decay that prevents premature splits. Chunks stay semantically coherent instead of cutting mid-thought at an arbitrary byte count.
 
