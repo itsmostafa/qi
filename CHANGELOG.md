@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.9.0](https://github.com/itsmostafa/qi/compare/v0.8.0...v0.9.0) (2026-06-04)
+
+
+### Features
+
+* **config:** expand env vars in provider api_key and base_url fields ([7d9bf4f](https://github.com/itsmostafa/qi/commit/7d9bf4fb2c422ac47b35b1f1e741ea0a8108402c))
+* **providers:** env var expansion in config and base_url normalization ([0e01f25](https://github.com/itsmostafa/qi/commit/0e01f253d9812ac8c21d000329680a30d3614aaf))
+* **providers:** truncate oversized embedding inputs at max_input_chars ([230830c](https://github.com/itsmostafa/qi/commit/230830c6711be21eda7a1fd5a6f7b2664bb6f1e7))
+* **search:** add extension-based score boosting ([5590f3f](https://github.com/itsmostafa/qi/commit/5590f3f1a68e39772de93abedc19537e84e8c555))
+
+
+### Bug Fixes
+
+* **chunker:** force-split lines exceeding target size ([afad394](https://github.com/itsmostafa/qi/commit/afad394c281d153f8544f87dad508497c09401d6))
+* **config:** expand env vars in rerank provider base_url ([4e2fb29](https://github.com/itsmostafa/qi/commit/4e2fb292dde2ad3e8268ed30c5ff2b037d2a1fcc))
+* **providers:** normalize base_url to prevent doubled /v1 path ([814688a](https://github.com/itsmostafa/qi/commit/814688a52a3ad589ea29702bbd9e956c8118db18))
+
 ## [0.8.0](https://github.com/itsmostafa/qi/compare/v0.7.0...v0.8.0) (2026-05-06)
 
 
