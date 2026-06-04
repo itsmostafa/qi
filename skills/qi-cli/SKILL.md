@@ -50,7 +50,7 @@ BM25 full-text search. Fast, offline, no provider needed.
 
 ```bash
 qi search "authentication"
-qi search "deploy" -c code -n 5
+qi search "deploy" -c wiki -n 5
 ```
 
 ### `qi query <query>`
@@ -75,7 +75,7 @@ Use this sparingly; prefer `qi query` for normal exploration, evidence gathering
 
 ```bash
 qi ask "What authentication methods are supported?"
-qi ask "Explain the chunking algorithm" -c code
+qi ask "Explain the chunking algorithm"
 ```
 
 Requires a `generation` provider in config.
@@ -135,10 +135,10 @@ collections:
     extensions: [.md, .txt]
     ignore: [.git]
 
-  - name: code
-    path: ~/Projects/myproject
-    extensions: [.go, .ts, .py]
-    ignore: [vendor, dist]
+  - name: wiki
+    path: ~/wiki
+    extensions: [.md, .txt]
+    ignore: [.git]
 
 providers:
   embedding:                              # optional — enables vector/hybrid search

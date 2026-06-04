@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-qi is a local-first knowledge search CLI for macOS. It indexes documents (Markdown, plaintext, source code) into a SQLite database and provides BM25 full-text search, vector search (with local embedding providers), and LLM-powered Q&A with citations.
+qi is a local-first knowledge search CLI for macOS. It indexes documents (Markdown, plaintext) into a SQLite database and provides BM25 full-text search, vector search (with local embedding providers), and LLM-powered Q&A with citations.
 
 ## Build
 
@@ -40,7 +40,7 @@ internal/
   chunker/            Break-point chunker (chunker.Chunker interface)
   indexer/            Filesystem walker, SHA-256 change detection, embedder
   output/             Text/JSON formatters (ask results, generic formatter)
-  parser/             Document parsers (Markdown via goldmark, plaintext, source)
+  parser/             Document parsers (Markdown via goldmark, plaintext)
   providers/          HTTP adapters for embedding, rerank, generation APIs
   search/             BM25, vector KNN, RRF fusion, hybrid, ask, cache, prompt
   version/            Build-time version injection

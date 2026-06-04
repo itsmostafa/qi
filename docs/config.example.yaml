@@ -10,14 +10,14 @@ collections:
   - name: notes
     path: ~/notes
     description: Personal notes and documents
-    extensions: [.md, .txt]     # Omit to use defaults (.md, .txt, .go, .ts, etc.)
+    extensions: [.md, .txt]     # Omit to use defaults (.md, .markdown, .txt, .text)
     ignore: [.git, node_modules, .DS_Store]
 
-  - name: Projects-myproject
-    path: ~/Projects/myproject
-    description: Source code for myproject
-    extensions: [.go, .ts, .py]
-    ignore: [vendor, node_modules, dist, .git]
+  - name: wiki
+    path: ~/wiki
+    description: Team wiki and documentation
+    extensions: [.md, .txt]
+    ignore: [.git, .DS_Store]
 
 providers:
   # Embedding provider for vector search (OpenAI-compatible /v1/embeddings)
