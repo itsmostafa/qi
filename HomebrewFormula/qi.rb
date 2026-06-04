@@ -1,8 +1,8 @@
 class Qi < Formula
   desc "Local-first knowledge search CLI"
   homepage "https://github.com/itsmostafa/qi"
-  url "https://github.com/itsmostafa/qi/archive/refs/tags/v0.8.0.tar.gz"
-  sha256 "a6549b17c7a666ef17ef4ad84f7fcaa3a4fdd4a28054994987454244ccb93a04"
+  url "https://github.com/itsmostafa/qi/archive/refs/tags/v0.9.0.tar.gz"
+  sha256 "afd5f9aa80132dd6a8ec7cee6900755137d4a9fab869bcf1bd3b3426449a0112"
   license "MIT"
   head "https://github.com/itsmostafa/qi.git", branch: "main"
 
