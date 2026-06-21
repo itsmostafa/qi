@@ -55,6 +55,18 @@ Collection names are derived from paths, for example `/Users/alice/Projects/tool
 
 All providers are optional. Omitting them degrades gracefully: BM25 search always works without any provider configured.
 
+**Environment variables**: `${VAR}` references in any provider's `base_url` and `api_key` are expanded from the environment when the config loads, so you can keep secrets out of the file:
+
+```yaml
+providers:
+  embedding:
+    name: openai
+    base_url: ${QI_EMBED_URL}
+    api_key: ${OPENAI_API_KEY}
+```
+
+`base_url` is also normalized — a trailing `/v1` is handled automatically, so both `https://api.openai.com` and `https://api.openai.com/v1` work without producing a doubled `/v1/v1` path.
+
 ### `providers.embedding`
 
 Enables vector search and hybrid mode (`--mode hybrid`). Must expose an OpenAI-compatible `POST /v1/embeddings` endpoint.
@@ -67,6 +79,7 @@ providers:
     model: nomic-embed-text
     dimension: 768
     batch_size: 32      # optional, default 32
+    max_input_chars: 0  # optional, 0 = no limit
     api_key: ""         # optional
 ```
 
@@ -77,6 +90,7 @@ providers:
 | `model` | Model name passed in the API request |
 | `dimension` | Output vector dimension — must match the model |
 | `batch_size` | Texts per HTTP request; reduce if the server has payload limits |
+| `max_input_chars` | Safety net: truncate any text longer than this many characters before embedding. `0` (default) disables truncation. Set it for models with a hard token limit — e.g. `24000` (~6k tokens) for an 8k-token model |
 | `api_key` | Bearer token; set for services that require authentication |
 
 **Recipes**
@@ -207,7 +221,7 @@ _OpenAI_ (cloud, requires API key):
 ```yaml
 generation:
   name: openai
-  model: gpt-4o-mini
+  model: gpt-5.4-mini
   # base_url and api_key filled from OPENAI_API_KEY
 ```
 
@@ -228,6 +242,8 @@ search:
   rrf_k: 60
   chunk_size: 512
   chunk_overlap: 64
+  prefer_extensions: [.md, .txt]   # optional — boost results with these extensions
+  extension_boost: 2.0             # optional — multiplier for preferred extensions
 ```
 
 | Key | Default | Description |
@@ -239,6 +255,8 @@ search:
 | `rrf_k` | `60` | Reciprocal Rank Fusion constant; higher values reduce the influence of rank position |
 | `chunk_size` | `512` | Target chunk size in characters during indexing |
 | `chunk_overlap` | `64` | Reserved; not used by the current break-point chunker |
+| `prefer_extensions` | _(none)_ | File extensions whose result scores are multiplied by `extension_boost`, then re-sorted. Empty disables boosting |
+| `extension_boost` | `2.0` | Score multiplier applied to results matching `prefer_extensions`. Only used when `prefer_extensions` is set; values `≤ 0` fall back to `2.0` |
 
 `default_mode: hybrid` requires an embedding provider. `default_mode: deep` additionally requires a rerank provider. If the required provider is absent, qi falls back to `lexical` with a warning.
 

@@ -169,7 +169,7 @@ providers:
   #   batch_size: 32
   # generation:
   #   name: openai
-  #   model: gpt-5.4-nano
+  #   model: gpt-5.4-mini
 ```
 
 ## Document IDs
