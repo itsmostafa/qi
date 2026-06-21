@@ -145,6 +145,7 @@ providers:
     base_url: http://localhost:11434      # Ollama, LM Studio, llama.cpp, OpenAI-compatible
     model: nomic-embed-text
     dimension: 768
+    max_input_chars: 0                    # optional — truncate long texts before embedding (0 = no limit)
 
   rerank:                                 # optional — enables deep mode
     base_url: http://localhost:8080
@@ -162,7 +163,11 @@ search:
   rerank_top_k: 10
   rrf_k: 60
   chunk_size: 512
+  prefer_extensions: [.md, .txt]          # optional — boost results with these extensions
+  extension_boost: 2.0                     # optional — score multiplier for preferred extensions (default 2.0)
 ```
+
+`base_url` and `api_key` support `${VAR}` environment-variable expansion, and a trailing `/v1` in `base_url` is normalized automatically (no doubled `/v1/v1`).
 
 ### Common provider setups
 
@@ -187,7 +192,7 @@ providers:
     dimension: 1536
   generation:
     base_url: https://api.openai.com/v1
-    model: gpt-4o
+    model: gpt-5.4-mini
     api_key: sk-...
 ```
 
@@ -200,7 +205,7 @@ providers:
     dimension: 768
   generation:
     base_url: https://api.openai.com/v1
-    model: gpt-4o
+    model: gpt-5.4-mini
     api_key: sk-...
 ```
 

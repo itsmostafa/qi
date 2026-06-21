@@ -24,10 +24,12 @@ providers:
   # Uncomment to enable hybrid search with local Ollama or llama.cpp
   # embedding:
   #   name: ollama
-  #   base_url: http://localhost:11434
+  #   base_url: http://localhost:11434      # ${VAR} env references are expanded
   #   model: nomic-embed-text
   #   dimension: 768
   #   batch_size: 32
+  #   max_input_chars: 24000   # optional safety net: truncate texts over ~6k tokens (omit/0 = no limit)
+  #   api_key: ${OPENAI_API_KEY}   # optional; ${VAR} is read from the environment
 
   # Reranking provider (optional, used with --mode deep)
   # rerank:
@@ -50,3 +52,5 @@ search:
   rrf_k: 60              # Reciprocal Rank Fusion constant (default 60)
   chunk_size: 512        # Target chunk size in characters
   chunk_overlap: 64      # Not used in break-point chunker (reserved)
+  # prefer_extensions: [.md, .txt]   # Boost scores for these file types
+  # extension_boost: 2.0             # Multiplier applied to preferred extensions (default 2.0)
