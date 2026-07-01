@@ -1,4 +1,6 @@
-# qi — Claude Code Guidance
+# qi — Agent Guidance
+
+This file is the canonical guidance for AI coding agents working in this repo. `AGENTS.md` is a symlink to it, so Claude Code, Codex, and other agents read the same instructions.
 
 ## Project Overview
 
@@ -31,7 +33,7 @@ Always run `task check` before finishing any code change to ensure all checks pa
 ## Package Structure
 
 ```
-cmd/                  Cobra commands (root, init, index, search, query, ask, get, doctor, stats, list, update)
+cmd/                  Cobra commands (root, init, index, search, query, ask, get, doctor, stats, list, delete, update)
 internal/
   app/                Wires config + db + services
   config/             Config loading, defaults, path expansion

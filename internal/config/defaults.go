@@ -120,7 +120,7 @@ providers:
   # Or use OpenAI generation — set OPENAI_API_KEY in your environment
   # generation:
   #   name: openai
-  #   model: gpt-4o-mini
+  #   model: gpt-5.4-mini
 
 search:
   default_mode: hybrid   # lexical | hybrid | deep
