@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -141,21 +142,26 @@ func isPathArg(s string) bool {
 }
 
 func runIndex(ctx context.Context, a *app.App, collections []config.Collection) error {
+	var collectionErrs []error
 	for _, col := range collections {
 		fmt.Printf("Indexing %q (%s)...\n", col.Name, col.Path)
 		stats, err := a.Indexer.Index(ctx, col)
 		if err != nil {
+			err = fmt.Errorf("indexing collection %q: %w", col.Name, err)
 			fmt.Printf("  error: %v\n", err)
+			collectionErrs = append(collectionErrs, err)
 			continue
 		}
-		fmt.Printf("  scanned=%d added=%d updated=%d removed=%d time=%s\n",
-			stats.FilesScanned, stats.FilesAdded, stats.FilesUpdated, stats.FilesRemoved, stats.Duration.Round(1000000))
+		fmt.Printf("  scanned=%d added=%d updated=%d removed=%d skipped=%d time=%s\n",
+			stats.FilesScanned, stats.FilesAdded, stats.FilesUpdated, stats.FilesRemoved, stats.FilesSkipped, stats.Duration.Round(1000000))
 		if a.Embedder != nil {
 			fmt.Printf("  embedding chunks...\n")
 			if err := a.Embedder.EmbedCollection(ctx, col.Name); err != nil {
-				return fmt.Errorf("embedding collection %q: %w", col.Name, err)
+				err = fmt.Errorf("embedding collection %q: %w", col.Name, err)
+				fmt.Printf("  error: %v\n", err)
+				collectionErrs = append(collectionErrs, err)
 			}
 		}
 	}
-	return nil
+	return errors.Join(collectionErrs...)
 }

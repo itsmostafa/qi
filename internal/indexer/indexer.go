@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -25,11 +24,11 @@ var defaultIgnoreDirs = map[string]bool{
 	".git": true, ".hg": true, ".svn": true,
 	".venv": true, "venv": true, ".env": true,
 	"node_modules": true,
-	"vendor": true,
-	".tox": true, ".mypy_cache": true, ".pytest_cache": true, "__pycache__": true,
+	"vendor":       true,
+	".tox":         true, ".mypy_cache": true, ".pytest_cache": true, "__pycache__": true,
 	".ruff_cache": true, ".hypothesis": true,
-	"target": true,        // Rust/Java/Maven
-	"dist": true, "build": true, "out": true,
+	"target": true, // Rust/Java/Maven
+	"dist":   true, "build": true, "out": true,
 	".gradle": true, ".idea": true, ".vscode": true,
 	".DS_Store": true,
 }
@@ -46,13 +45,15 @@ type Stats struct {
 	FilesAdded   int
 	FilesUpdated int
 	FilesRemoved int
+	FilesSkipped int
 	Duration     time.Duration
 }
 
 // Indexer walks a collection and upserts documents into the DB.
 type Indexer struct {
-	db      *db.DB
-	chunker chunker.Chunker
+	db         *db.DB
+	chunker    chunker.Chunker
+	beforeRead func(string) // test hook; called after discovery, before secure open
 }
 
 func New(database *db.DB, chunkSize int) *Indexer {
@@ -86,16 +87,43 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 		ignoreSet[ig] = true
 	}
 
-	// Track which paths we've seen to detect deletions
-	seenPaths := map[string]bool{}
+	// Canonicalize the collection root once so a configured symlinked root is
+	// pinned to its target. Entries below it are never followed through links.
+	// Keep col.Path/col.Name unchanged because document keys use the configured
+	// collection identity.
+	canonicalRoot, err := config.CanonicalPath(col.Path)
+	if err != nil {
+		canonicalRoot = filepath.Clean(col.Path)
+	}
 
-	err = filepath.WalkDir(col.Path, func(path string, d fs.DirEntry, err error) error {
+	root, err := openSecureRoot(canonicalRoot)
+	if err != nil {
+		runErr := fmt.Errorf("opening collection root %s: %w", col.Path, err)
+		if finishErr := idx.finishRun(ctx, runID, stats, runErr); finishErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("finishing index run: %w", finishErr))
+		}
+		return stats, runErr
+	}
+	defer root.Close()
+
+	// Track which paths we've seen to detect deletions and collect every file
+	// failure rather than reporting a successful (but stale) collection run.
+	seenPaths := map[string]bool{}
+	var fileErrs []error
+
+	err = filepath.WalkDir(canonicalRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if defaultIgnoreDirs[name] || ignoreSet[name] || (strings.HasPrefix(name, ".") && name != ".") {
+			// Never skip the root itself based on its own basename — a
+			// collection rooted at a dot-directory or a name that matches
+			// the ignore/default-ignore sets (e.g. ~/.notes, ~/dist) would
+			// otherwise return SkipDir immediately, yielding an empty
+			// seenPaths and deactivating every document in the collection.
+			if path != canonicalRoot &&
+				(defaultIgnoreDirs[name] || ignoreSet[name] || (strings.HasPrefix(name, ".") && name != ".")) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -106,7 +134,17 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 			return nil
 		}
 
-		relPath, err := filepath.Rel(col.Path, path)
+		// Never follow file symlinks. Containment checks followed by os.ReadFile
+		// are racy: an attacker can replace the checked entry before it opens.
+		// Regular files are opened descriptor-relatively below with O_NOFOLLOW
+		// on every component.
+		if d.Type()&fs.ModeSymlink != 0 {
+			slog.Warn("skipping symlink", "path", path)
+			stats.FilesSkipped++
+			return nil
+		}
+
+		relPath, err := filepath.Rel(canonicalRoot, path)
 		if err != nil {
 			return err
 		}
@@ -114,35 +152,45 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 		stats.FilesScanned++
 		seenPaths[relPath] = true
 
-		if err := idx.indexFile(ctx, col, relPath, path, &stats); err != nil {
+		if idx.beforeRead != nil {
+			idx.beforeRead(path)
+		}
+		data, err := root.ReadFile(relPath)
+		if err == nil {
+			err = idx.indexFile(ctx, col, relPath, data, &stats)
+		}
+		if err != nil {
+			err = fmt.Errorf("indexing %s: %w", relPath, err)
 			slog.Warn("failed to index file", "path", relPath, "error", err)
+			fileErrs = append(fileErrs, err)
 		}
 
 		return nil
 	})
 	if err != nil {
-		_ = idx.finishRun(ctx, runID, stats, err)
-		return stats, fmt.Errorf("walking %s: %w", col.Path, err)
+		runErr := errors.Join(errors.Join(fileErrs...), fmt.Errorf("walking %s: %w", col.Path, err))
+		if finishErr := idx.finishRun(ctx, runID, stats, runErr); finishErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("finishing index run: %w", finishErr))
+		}
+		return stats, runErr
 	}
 
 	// Deactivate documents that no longer exist on disk
-	removed, err := idx.deactivateMissing(ctx, col.Name, seenPaths)
-	if err != nil {
-		slog.Warn("deactivating missing files", "error", err)
-	}
+	removed, deactivateErr := idx.deactivateMissing(ctx, col.Name, seenPaths)
 	stats.FilesRemoved = removed
+	if deactivateErr != nil {
+		fileErrs = append(fileErrs, fmt.Errorf("deactivating missing files: %w", deactivateErr))
+	}
 
 	stats.Duration = time.Since(start)
-	_ = idx.finishRun(ctx, runID, stats, nil)
-	return stats, nil
+	runErr := errors.Join(fileErrs...)
+	if finishErr := idx.finishRun(ctx, runID, stats, runErr); finishErr != nil {
+		runErr = errors.Join(runErr, fmt.Errorf("finishing index run: %w", finishErr))
+	}
+	return stats, runErr
 }
 
-func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPath, absPath string, stats *Stats) error {
-	data, err := os.ReadFile(absPath)
-	if err != nil {
-		return err
-	}
-
+func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPath string, data []byte, stats *Stats) error {
 	hash := sha256sum(data)
 
 	// Check if document exists (active or deactivated) and whether content changed
@@ -254,27 +302,47 @@ func (idx *Indexer) deactivateMissing(ctx context.Context, collection string, se
 	}
 	defer rows.Close()
 
-	var toDeactivate []int64
+	toDeactivate, err := missingDocumentIDs(rows, seen)
+	if err != nil {
+		return 0, err
+	}
+
+	var errs []error
+	removed := 0
+	for _, id := range toDeactivate {
+		if _, err := idx.db.ExecContext(ctx,
+			`UPDATE documents SET active=0, updated_at=datetime('now') WHERE id=?`, id); err != nil {
+			errs = append(errs, fmt.Errorf("document %d: %w", id, err))
+			continue
+		}
+		removed++
+	}
+
+	return removed, errors.Join(errs...)
+}
+
+type rowIterator interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+}
+
+func missingDocumentIDs(rows rowIterator, seen map[string]bool) ([]int64, error) {
+	var missing []int64
 	for rows.Next() {
 		var id int64
 		var path string
 		if err := rows.Scan(&id, &path); err != nil {
-			continue
+			return nil, fmt.Errorf("scanning active document: %w", err)
 		}
 		if !seen[path] {
-			toDeactivate = append(toDeactivate, id)
+			missing = append(missing, id)
 		}
 	}
-
-	for _, id := range toDeactivate {
-		_, err := idx.db.ExecContext(ctx,
-			`UPDATE documents SET active=0, updated_at=datetime('now') WHERE id=?`, id)
-		if err != nil {
-			slog.Warn("deactivating document", "id", id, "error", err)
-		}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reading active documents: %w", err)
 	}
-
-	return len(toDeactivate), nil
+	return missing, nil
 }
 
 func (idx *Indexer) startRun(ctx context.Context, collection string) (int64, error) {

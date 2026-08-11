@@ -42,17 +42,27 @@ func New(ctx context.Context, cfgPath string) (*App, error) {
 		}
 	}
 
+	// The embedding fingerprint identifies which provider endpoint and
+	// model/dimension/truncation config produced a stored vector. Computed once here so the embedder
+	// (writer) and vector search (reader) always agree on the active
+	// identity. Empty when no embedding provider is configured.
+	fingerprint := cfg.Providers.Embedding.Fingerprint()
+
 	a := &App{
 		Config:  cfg,
 		DB:      database,
 		Indexer: indexer.New(database, cfg.Search.ChunkSize),
 		BM25:    search.NewBM25(database),
-		Vector:  search.NewVectorSearch(database),
+		Vector:  search.NewVectorSearch(database, fingerprint),
 	}
 
 	if cfg.Providers.Embedding != nil {
 		embProvider := providers.NewEmbedding(cfg.Providers.Embedding)
-		a.Embedder = indexer.NewEmbedder(database, embProvider)
+		providerTag := cfg.Providers.Embedding.Name
+		if providerTag == "" {
+			providerTag = "http"
+		}
+		a.Embedder = indexer.NewEmbedder(database, embProvider, providerTag, fingerprint)
 		a.Hybrid = search.NewHybrid(a.BM25, a.Vector, embProvider, cfg.Search)
 	}
 

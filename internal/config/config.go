@@ -1,9 +1,13 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -28,6 +32,24 @@ type EmbeddingProviderConfig struct {
 	MaxInputChars int    `yaml:"max_input_chars,omitempty"`
 }
 
+// Fingerprint identifies the provider endpoint and embedding settings that
+// produced a vector. API keys and batching are intentionally excluded.
+func (c *EmbeddingProviderConfig) Fingerprint() string {
+	if c == nil {
+		return ""
+	}
+	endpoint := strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
+	if u, err := url.Parse(endpoint); err == nil {
+		u.Scheme = strings.ToLower(u.Scheme)
+		u.Host = strings.ToLower(u.Host)
+		endpoint = strings.TrimRight(u.String(), "/")
+	}
+	raw := "provider=" + c.Name + "|endpoint=" + endpoint + "|model=" + c.Model +
+		"|dim=" + strconv.Itoa(c.Dimension) + "|maxchars=" + strconv.Itoa(c.MaxInputChars)
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
 type RerankProviderConfig struct {
 	Name    string `yaml:"name"`
 	BaseURL string `yaml:"base_url"`
@@ -48,15 +70,15 @@ type Providers struct {
 }
 
 type SearchConfig struct {
-	DefaultMode        string   `yaml:"default_mode"`
-	BM25TopK           int      `yaml:"bm25_top_k"`
-	VectorTopK         int      `yaml:"vector_top_k"`
-	RerankTopK         int      `yaml:"rerank_top_k"`
-	RRFK               int      `yaml:"rrf_k"`
-	ChunkSize          int      `yaml:"chunk_size"`
-	ChunkOverlap       int      `yaml:"chunk_overlap"`
-	PreferExtensions   []string `yaml:"prefer_extensions,omitempty"`
-	ExtensionBoost     float64  `yaml:"extension_boost,omitempty"`
+	DefaultMode      string   `yaml:"default_mode"`
+	BM25TopK         int      `yaml:"bm25_top_k"`
+	VectorTopK       int      `yaml:"vector_top_k"`
+	RerankTopK       int      `yaml:"rerank_top_k"`
+	RRFK             int      `yaml:"rrf_k"`
+	ChunkSize        int      `yaml:"chunk_size"`
+	ChunkOverlap     int      `yaml:"chunk_overlap"`
+	PreferExtensions []string `yaml:"prefer_extensions,omitempty"`
+	ExtensionBoost   float64  `yaml:"extension_boost,omitempty"`
 }
 
 type Config struct {
@@ -383,6 +405,9 @@ func writeConfigNode(configPath string, doc *yaml.Node) error {
 }
 
 func (c *Config) validate() error {
+	if c.Providers.Embedding != nil && c.Providers.Embedding.Dimension <= 0 {
+		return fmt.Errorf("embedding dimension must be positive, got %d", c.Providers.Embedding.Dimension)
+	}
 	seen := map[string]bool{}
 	seenPaths := map[string]string{}
 	for _, col := range c.Collections {

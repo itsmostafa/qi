@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/itsmostafa/qi/internal/app"
+	"github.com/itsmostafa/qi/internal/db"
 	"github.com/spf13/cobra"
 )
 
@@ -24,32 +25,48 @@ var statsCmd = &cobra.Command{
 			name      string
 			documents int
 			chunks    int
-			embeddings int
+			health    db.EmbeddingHealth
 		}
+
+		// Active fingerprint identifies which embeddings match the currently
+		// configured model/dimension/truncation settings; "" when no
+		// embedding provider is configured.
+		fingerprint := a.Config.Providers.Embedding.Fingerprint()
 
 		var collections []collectionStats
 		rows, err := a.DB.QueryContext(ctx, `
 			SELECT
 				d.collection,
-				COUNT(DISTINCT d.id)  AS docs,
-				COUNT(DISTINCT c.id)  AS chunks,
-				COUNT(DISTINCT e.chunk_id) AS embeddings
+				COUNT(DISTINCT d.id) AS docs,
+				COUNT(DISTINCT c.id) AS chunks
 			FROM documents d
 			LEFT JOIN chunks c ON c.doc_id = d.id
-			LEFT JOIN embeddings e ON e.chunk_id = c.id
 			WHERE d.active = 1
 			GROUP BY d.collection
 		`)
 		if err != nil {
 			return fmt.Errorf("querying stats: %w", err)
 		}
-		defer rows.Close()
 		for rows.Next() {
 			var s collectionStats
-			if err := rows.Scan(&s.name, &s.documents, &s.chunks, &s.embeddings); err != nil {
-				continue
+			if err := rows.Scan(&s.name, &s.documents, &s.chunks); err != nil {
+				rows.Close()
+				return fmt.Errorf("scanning stats: %w", err)
 			}
 			collections = append(collections, s)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("reading stats: %w", err)
+		}
+		rows.Close()
+		if a.Config.Providers.Embedding != nil {
+			for i := range collections {
+				collections[i].health, err = a.DB.EmbeddingHealth(ctx, fingerprint, a.Config.Providers.Embedding.Dimension, collections[i].name)
+				if err != nil {
+					return err
+				}
+			}
 		}
 
 		// DB file size
@@ -74,7 +91,12 @@ var statsCmd = &cobra.Command{
 			fmt.Fprintf(os.Stdout, "  Collection: %s\n", s.name)
 			fmt.Fprintf(os.Stdout, "    Documents:  %d\n", s.documents)
 			fmt.Fprintf(os.Stdout, "    Chunks:     %d\n", s.chunks)
-			fmt.Fprintf(os.Stdout, "    Embeddings: %d\n", s.embeddings)
+			if a.Config.Providers.Embedding == nil {
+				fmt.Fprintln(os.Stdout, "    Embeddings: not configured")
+			} else {
+				fmt.Fprintf(os.Stdout, "    Embeddings: %d current / %d missing / %d stale / %d orphaned\n",
+					s.health.Current, s.health.Missing, s.health.Stale, s.health.Orphaned)
+			}
 		}
 		fmt.Fprintf(os.Stdout, "\n  Database size: %s\n", formatBytes(dbSize))
 		fmt.Fprintf(os.Stdout, "  Last indexed:  %s\n", lastRun)

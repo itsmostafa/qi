@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
 )
@@ -27,10 +29,16 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		return nil, fmt.Errorf("opening sqlite3: %w", err)
 	}
 
-	// Single writer to avoid SQLITE_BUSY under WAL
+	// Single writer per process, plus a bounded cross-process wait before any
+	// lock-prone initialization. This must precede journal-mode setup and
+	// migrations so simultaneous first starts wait instead of failing BUSY.
 	sqlDB.SetMaxOpenConns(1)
+	if _, err := sqlDB.ExecContext(ctx, `PRAGMA busy_timeout=10000`); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting SQLite busy timeout: %w", err)
+	}
 
-	if _, err := sqlDB.ExecContext(ctx, `PRAGMA journal_mode=WAL`); err != nil {
+	if err := execBusyRetry(ctx, sqlDB, `PRAGMA journal_mode=WAL`, 10*time.Second); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("enabling WAL: %w", err)
 	}
@@ -48,6 +56,33 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	}
 
 	return db, nil
+}
+
+// journal_mode can return SQLITE_BUSY immediately even with busy_timeout, so
+// retry lock failures within the same bounded initialization window.
+func execBusyRetry(ctx context.Context, database *sql.DB, statement string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	delay := 5 * time.Millisecond
+	for {
+		_, err := database.ExecContext(ctx, statement)
+		if err == nil {
+			return nil
+		}
+		message := strings.ToLower(err.Error())
+		if (!strings.Contains(message, "locked") && !strings.Contains(message, "busy")) || time.Now().After(deadline) {
+			return err
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		if delay < 100*time.Millisecond {
+			delay *= 2
+		}
+	}
 }
 
 // Ping verifies the database connection.
