@@ -1,6 +1,6 @@
 # Architecture
 
-qi turns any directory into a searchable knowledge base — no servers, no infrastructure, no cloud dependencies. Everything lives in a single SQLite file at `~/.local/share/qi/qi.db`: indexed content, embeddings, cached responses. The system meets you where you are: BM25 full-text search works immediately with zero configuration, vector search activates when you point qi at an embedding model, and LLM-powered Q&A unlocks when you add a generation provider. Each tier builds on the last.
+qi turns any directory into a searchable knowledge base — no servers, no infrastructure, no cloud dependencies. Everything lives in a single SQLite file at `~/.local/share/qi/qi.db`: indexed content and embeddings. The system meets you where you are: BM25 full-text search works immediately with zero configuration, and vector search activates when you point qi at an embedding model. Each tier builds on the last.
 
 ## Diagram
 
@@ -31,16 +31,6 @@ From there, qi makes a fast decision:
 
 The result is search that's precise when the keyword match is obvious, and semantically aware when it isn't.
 
-## Q&A
-
-`qi ask` turns your index into a private research assistant. It retrieves context the same way as `qi query`, then:
-
-1. Assembles the top 10 passages into a prompt. Each passage carries a `qi://collection/path` URI so the model can cite its sources precisely.
-2. Checks a response cache keyed by `SHA-256(model + prompt)`. A repeated question costs nothing — no API call, no wait.
-3. Calls the generation provider, streams back the answer, and caches it for next time.
-
-The cache key covers both the model and the full prompt content. Change the model, change the retrieved context, change the question — the cache busts automatically.
-
 ## Database Schema
 
 One file. Every table in `internal/db/migrations/001_init.sql`. WAL mode enabled.
@@ -55,7 +45,6 @@ One file. Every table in `internal/db/migrations/001_init.sql`. WAL mode enabled
 | `embeddings` | Provider, model, and dimension metadata for each embedded chunk. |
 | `collections` | Path-derived collections from config or `qi index <path>`. |
 | `index_runs` | Full audit log of every indexing run: file counts, timestamps, errors. |
-| `llm_cache` | Cached LLM responses keyed by `SHA-256(model + "\x00" + prompt)`. |
 
 ## Under the Hood
 

@@ -1,9 +1,9 @@
 ---
 name: qi-cli
-description: Guide for using qi, a local knowledge search CLI for macOS and Linux. Use this skill whenever the user asks about qi commands, indexing documents, searching a knowledge base, asking questions with RAG, configuring providers (Ollama, OpenAI), understanding search modes (BM25, hybrid, vector), or anything related to the qi tool. Triggers on phrases like "qi index", "qi search", "qi ask", "qi query", "how do I use qi", "set up qi", "configure qi", "search my notes with qi", or any mention of the qi CLI.
+description: Guide for using qi, a local knowledge search CLI for macOS and Linux. Use this skill whenever the user asks about qi commands, indexing documents, searching a knowledge base, configuring providers (Ollama, OpenAI), understanding search modes (BM25, hybrid, vector), or anything related to the qi tool. Triggers on phrases like "qi index", "qi search", "qi query", "how do I use qi", "set up qi", "configure qi", "search my notes with qi", or any mention of the qi CLI.
 ---
 
-qi is a local-first knowledge search CLI. It indexes documents into SQLite and supports BM25 full-text search, vector/hybrid search (with a local or remote embedding provider), and LLM-powered Q&A with citations.
+qi is a local-first knowledge search CLI. It indexes documents into SQLite and supports BM25 full-text search and vector/hybrid search (with a local or remote embedding provider).
 
 ## Quick Start
 
@@ -14,7 +14,6 @@ qi index                                  # Index the current directory, or a co
 qi doctor                                 # Verify setup
 qi search "your query"                    # BM25 keyword search (no provider needed)
 qi query "your semantic question"         # Hybrid search (needs embedding provider)
-qi ask "what does X do?"                  # RAG Q&A; use sparingly (needs generation provider)
 ```
 
 ---
@@ -23,7 +22,6 @@ qi ask "what does X do?"                  # RAG Q&A; use sparingly (needs genera
 
 Prefer `qi index` when the task is about adding, refreshing, or organizing source material.
 Prefer `qi search` or `qi query` when the task is about finding relevant documents, passages, or citations.
-Use `qi ask` sparingly, only when the user specifically needs a synthesized answer from an LLM rather than retrieved source results.
 
 ---
 
@@ -68,17 +66,6 @@ qi query "question" --explain               # show BM25/vector/RRF score breakdo
 - `lexical` — BM25 only
 - `hybrid` (default) — BM25 + vector fused with RRF; skips vector if BM25 has a clear winner
 - `deep` — hybrid + optional reranking pass
-
-### `qi ask <question>`
-RAG Q&A: searches the knowledge base, sends relevant chunks to an LLM, returns an answer with citations.
-Use this sparingly; prefer `qi query` for normal exploration, evidence gathering, and source lookup.
-
-```bash
-qi ask "What authentication methods are supported?"
-qi ask "Explain the chunking algorithm"
-```
-
-Requires a `generation` provider in config.
 
 ### `qi get <id>`
 Retrieve a document by its 6-character hash prefix (shown in search results).
@@ -151,11 +138,6 @@ providers:
     base_url: http://localhost:8080
     model: bge-reranker-v2-m3
 
-  generation:                             # optional — enables `qi ask`
-    base_url: http://localhost:11434
-    model: llama3.2
-    api_key: ""                           # set for OpenAI or auth-gated services
-
 search:
   default_mode: hybrid                    # lexical | hybrid | deep
   bm25_top_k: 50
@@ -178,9 +160,6 @@ providers:
     base_url: http://localhost:11434
     model: nomic-embed-text
     dimension: 768
-  generation:
-    base_url: http://localhost:11434
-    model: llama3.2
 ```
 
 **OpenAI:**
@@ -190,22 +169,6 @@ providers:
     base_url: https://api.openai.com/v1
     model: text-embedding-3-small
     dimension: 1536
-  generation:
-    base_url: https://api.openai.com/v1
-    model: gpt-5.4-mini
-    api_key: sk-...
-```
-
-**Mixed (local embeddings, cloud generation):**
-```yaml
-providers:
-  embedding:
-    base_url: http://localhost:11434
-    model: nomic-embed-text
-    dimension: 768
-  generation:
-    base_url: https://api.openai.com/v1
-    model: gpt-5.4-mini
     api_key: sk-...
 ```
 
@@ -248,13 +211,6 @@ qi delete old-notes              # remove collection data + config entry
 # add embedding provider to config
 qi index notes
 qi query "how does X work" --explain
-```
-
-**RAG Q&A (use sparingly):**
-```bash
-# also add a generation provider to config
-# prefer qi query unless you need a synthesized answer
-qi ask "Summarize the key decisions in my notes"
 ```
 
 **Debug / inspect:**
