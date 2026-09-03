@@ -209,7 +209,6 @@ func AddCollection(configPath string, col Collection) error {
 	}
 	root := doc.Content[0]
 	configDir := configFileDir(configPath)
-	col.Name = SlugFromPath(col.Path)
 
 	// Find the collections sequence node in the root mapping.
 	for i := 0; i+1 < len(root.Content); i += 2 {
@@ -217,16 +216,27 @@ func AddCollection(configPath string, col Collection) error {
 			continue
 		}
 		seq := root.Content[i+1]
+
+		// Name the whole set at once. Uniqueness is a property of the set, so
+		// naming this collection alone would hand a colliding basename to the
+		// check below and reject an addition the loader would have accepted.
+		resolved := make([]string, len(seq.Content))
+		for j, item := range seq.Content {
+			resolved[j] = resolveConfigFilePath(configDir, mappingValue(item, "path"))
+		}
+		assigned := AssignCollectionNames(append(append([]string{}, resolved...), col.Path))
+		col.Name = assigned[len(assigned)-1]
+
 		// Update an existing entry only when its canonical path matches. This
 		// lets old configs with custom names be normalized without allowing a
 		// generated-name collision to rewrite another collection's path.
-		for _, item := range seq.Content {
+		for idx, item := range seq.Content {
 			itemName := mappingValue(item, "name")
 			itemPath := mappingValue(item, "path")
-			resolvedItemPath := resolveConfigFilePath(configDir, itemPath)
+			resolvedItemPath := resolved[idx]
 			generatedName := ""
 			if itemPath != "" {
-				generatedName = SlugFromPath(resolvedItemPath)
+				generatedName = assigned[idx]
 			}
 			if !sameCanonicalPath(resolvedItemPath, col.Path) {
 				if itemName == col.Name || generatedName == col.Name {
@@ -261,7 +271,9 @@ func AddCollection(configPath string, col Collection) error {
 		return writeConfigNode(configPath, &doc)
 	}
 
-	// No collections key at all — append one.
+	// No collections key at all — this is the only collection, so its own
+	// directory name is unambiguous.
+	col.Name = SlugFromPath(col.Path)
 	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	seq.Content = append(seq.Content, collectionToNode(col))
 	root.Content = append(root.Content,

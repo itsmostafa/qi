@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -44,6 +45,11 @@ func AssignCollectionNames(paths []string) []string {
 			if len(idxs) < 2 {
 				continue
 			}
+			// The same directory listed twice cannot be told apart, and
+			// lengthening it only makes both names longer for nothing.
+			if identicalPaths(parts, idxs) {
+				continue
+			}
 			for _, i := range idxs {
 				if depth[i] < len(parts[i]) {
 					depth[i]++
@@ -61,6 +67,16 @@ func AssignCollectionNames(paths []string) []string {
 	// worse, since it depends on config order and could silently move one
 	// collection's name onto another's indexed rows.
 	return names
+}
+
+// identicalPaths reports whether every indexed path has the same segments.
+func identicalPaths(parts [][]string, idxs []int) bool {
+	for _, i := range idxs[1:] {
+		if !slices.Equal(parts[i], parts[idxs[0]]) {
+			return false
+		}
+	}
+	return true
 }
 
 // joinTail slugs the last n segments of a split path.

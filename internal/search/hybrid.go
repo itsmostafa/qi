@@ -76,6 +76,11 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 	if vecTopK <= 0 {
 		vecTopK = 50
 	}
+	// Finalize can only return what it is given: a pool smaller than the
+	// caller's limit caps the result count when BM25 contributes little.
+	if opts.TopK > vecTopK {
+		vecTopK = opts.TopK
+	}
 
 	vecResults, err := h.vector.Search(ctx, queryVec, vecTopK, opts)
 	if err != nil {

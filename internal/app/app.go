@@ -13,13 +13,13 @@ import (
 
 // App wires config, db, and services together.
 type App struct {
-	Config    *config.Config
-	DB        *db.DB
-	Indexer   *indexer.Indexer
-	Embedder  *indexer.Embedder // nil if no embedding provider configured
-	BM25      *search.BM25
-	Vector    *search.VectorSearch
-	Hybrid    *search.Hybrid
+	Config   *config.Config
+	DB       *db.DB
+	Indexer  *indexer.Indexer
+	Embedder *indexer.Embedder // nil if no embedding provider configured
+	BM25     *search.BM25
+	Vector   *search.VectorSearch
+	Hybrid   *search.Hybrid
 }
 
 // New opens the database and wires all services.
