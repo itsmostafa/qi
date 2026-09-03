@@ -1,6 +1,10 @@
 package search
 
-import "strings"
+import (
+	"cmp"
+	"slices"
+	"strings"
+)
 
 // Score scales. BM25 magnitudes are raw and corpus-dependent; RRF scores are
 // bounded near 1/rrf_k. They share a JSON key, so each result names its own.
@@ -24,17 +28,17 @@ const maxPerDoc = 2
 // dateFilterSQL builds the doc_timestamp predicates for Since/Until. alias is
 // the documents table alias in the caller's query.
 func dateFilterSQL(alias string, opts SearchOpts) (string, []any) {
-	var sql strings.Builder
+	var sql string
 	var args []any
 	if opts.Since != "" {
-		sql.WriteString(" AND " + alias + ".doc_timestamp >= ?")
+		sql += " AND " + alias + ".doc_timestamp >= ?"
 		args = append(args, opts.Since)
 	}
 	if opts.Until != "" {
-		sql.WriteString(" AND " + alias + ".doc_timestamp <= ?")
+		sql += " AND " + alias + ".doc_timestamp <= ?"
 		args = append(args, opts.Until)
 	}
-	return sql.String(), args
+	return sql, args
 }
 
 // capResults collapses duplicate chunks and stops any one document from
@@ -64,25 +68,16 @@ func capResults(results []Result) []Result {
 	return out
 }
 
-// sortByDate orders results newest first, falling back to score. Documents with
-// no timestamp sort last so a date query never leads with undated notes.
+// sortByDate orders results newest first, falling back to score. An empty
+// timestamp sorts lowest, so undated documents land last rather than leading a
+// date query.
 func sortByDate(results []Result) {
-	for i := 1; i < len(results); i++ {
-		r := results[i]
-		j := i - 1
-		for j >= 0 && dateLess(results[j], r) {
-			results[j+1] = results[j]
-			j--
+	slices.SortStableFunc(results, func(a, b Result) int {
+		if c := cmp.Compare(b.Timestamp, a.Timestamp); c != 0 {
+			return c
 		}
-		results[j+1] = r
-	}
-}
-
-func dateLess(a, b Result) bool {
-	if a.Timestamp != b.Timestamp {
-		return a.Timestamp < b.Timestamp // "" sorts lowest, so undated goes last
-	}
-	return a.Score < b.Score
+		return cmp.Compare(b.Score, a.Score)
+	})
 }
 
 // Finalize applies the ordering and trimming every command needs after

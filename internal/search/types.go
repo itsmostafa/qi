@@ -32,7 +32,7 @@ type SearchOpts struct {
 	Query      string
 	Collection string // empty = all collections
 	TopK       int
-	Pool       int // candidates to retrieve before dedupe/cap; defaults to TopK
+	Pool       int    // candidates to retrieve before dedupe/cap; defaults to TopK
 	Mode       string // lexical | hybrid | deep
 	Explain    bool
 	Since      string // YYYY-MM-DD, inclusive lower bound on document timestamp

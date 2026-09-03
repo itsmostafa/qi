@@ -39,13 +39,6 @@ func isTerminal(w io.Writer) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-func renderSnippet(s string, ansi bool) string {
-	if ansi {
-		return highlightANSI.Replace(s)
-	}
-	return highlightStripper.Replace(s)
-}
-
 // stripHighlights returns a copy of results with highlight markers removed, for
 // formats that carry no styling.
 func stripHighlights(results []search.Result) []search.Result {
@@ -82,7 +75,10 @@ func (f *TextFormatter) WriteResults(w io.Writer, results []search.Result) error
 		fmt.Fprintln(w, "No results found.")
 		return nil
 	}
-	ansi := isTerminal(w)
+	highlight := highlightStripper
+	if isTerminal(w) {
+		highlight = highlightANSI
+	}
 	for i, r := range results {
 		location := fmt.Sprintf("qi://%s/%s", r.Collection, r.Path)
 		if r.HeadingPath != "" {
@@ -99,7 +95,7 @@ func (f *TextFormatter) WriteResults(w io.Writer, results []search.Result) error
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "   %s\n", location)
 		if r.Snippet != "" {
-			fmt.Fprintf(w, "   %s\n", renderSnippet(r.Snippet, ansi))
+			fmt.Fprintf(w, "   %s\n", highlight.Replace(r.Snippet))
 		}
 		if r.Explain != nil {
 			ex := r.Explain

@@ -18,13 +18,20 @@ func addRecencyFlags(cmd *cobra.Command, since, until, sort *string) {
 }
 
 func validateSearchOpts(opts search.SearchOpts) error {
-	for name, value := range map[string]string{"since": opts.Since, "until": opts.Until} {
+	checkDate := func(name, value string) error {
 		if value == "" {
-			continue
+			return nil
 		}
 		if _, err := time.Parse(dateLayout, value); err != nil {
 			return fmt.Errorf("--%s must be YYYY-MM-DD, got %q", name, value)
 		}
+		return nil
+	}
+	if err := checkDate("since", opts.Since); err != nil {
+		return err
+	}
+	if err := checkDate("until", opts.Until); err != nil {
+		return err
 	}
 	switch opts.Sort {
 	case "", "relevance", "date":
