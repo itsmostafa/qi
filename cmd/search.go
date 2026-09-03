@@ -15,6 +15,9 @@ import (
 var (
 	searchCollection string
 	searchTopK       int
+	searchSince      string
+	searchUntil      string
+	searchSort       string
 )
 
 var searchCmd = &cobra.Command{
@@ -34,13 +37,21 @@ var searchCmd = &cobra.Command{
 			Query:      query,
 			Collection: searchCollection,
 			TopK:       searchTopK,
+			Pool:       a.Config.Search.BM25TopK,
 			Mode:       "lexical",
+			Since:      searchSince,
+			Until:      searchUntil,
+			Sort:       searchSort,
+		}
+		if err := validateSearchOpts(opts); err != nil {
+			return err
 		}
 
 		results, err := a.BM25.Search(ctx, opts)
 		if err != nil {
 			return fmt.Errorf("search failed: %w", err)
 		}
+		results = search.Finalize(results, opts)
 
 		formatter := output.New(format)
 		return formatter.WriteResults(os.Stdout, results)
@@ -50,4 +61,5 @@ var searchCmd = &cobra.Command{
 func init() {
 	searchCmd.Flags().StringVarP(&searchCollection, "collection", "c", "", "limit to a specific collection")
 	searchCmd.Flags().IntVarP(&searchTopK, "limit", "n", 10, "number of results to return")
+	addRecencyFlags(searchCmd, &searchSince, &searchUntil, &searchSort)
 }

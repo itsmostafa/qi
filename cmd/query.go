@@ -17,6 +17,9 @@ var (
 	queryExplain    bool
 	queryCollection string
 	queryTopK       int
+	querySince      string
+	queryUntil      string
+	querySort       string
 )
 
 var queryCmd = &cobra.Command{
@@ -36,8 +39,15 @@ var queryCmd = &cobra.Command{
 			Query:      q,
 			Collection: queryCollection,
 			TopK:       queryTopK,
+			Pool:       a.Config.Search.BM25TopK,
 			Mode:       queryMode,
 			Explain:    queryExplain,
+			Since:      querySince,
+			Until:      queryUntil,
+			Sort:       querySort,
+		}
+		if err := validateSearchOpts(opts); err != nil {
+			return err
 		}
 
 		var results []search.Result
@@ -57,6 +67,7 @@ var queryCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("query failed: %w", err)
 		}
+		results = search.Finalize(results, opts)
 
 		formatter := output.New(format)
 		return formatter.WriteResults(os.Stdout, results)
@@ -64,8 +75,9 @@ var queryCmd = &cobra.Command{
 }
 
 func init() {
-	queryCmd.Flags().StringVar(&queryMode, "mode", "hybrid", "search mode: lexical, hybrid, deep")
+	queryCmd.Flags().StringVar(&queryMode, "mode", "hybrid", "search mode: lexical or hybrid (deep is currently an alias for hybrid)")
 	queryCmd.Flags().BoolVar(&queryExplain, "explain", false, "show scoring breakdown")
 	queryCmd.Flags().StringVarP(&queryCollection, "collection", "c", "", "limit to a specific collection")
 	queryCmd.Flags().IntVarP(&queryTopK, "limit", "n", 10, "number of results to return")
+	addRecencyFlags(queryCmd, &querySince, &queryUntil, &querySort)
 }

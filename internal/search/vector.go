@@ -29,7 +29,7 @@ type vecCandidate struct {
 }
 
 // Search returns up to topK results nearest to the query embedding.
-func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, topK int, collection string) ([]Result, error) {
+func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, topK int, opts SearchOpts) ([]Result, error) {
 	if err := validateVector(queryEmbedding); err != nil {
 		return nil, fmt.Errorf("invalid query embedding: %w", err)
 	}
@@ -45,10 +45,13 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 
 	var collectionFilter string
 	args := []any{v.fingerprint}
-	if collection != "" {
+	if opts.Collection != "" {
 		collectionFilter = "AND d.collection = ?"
-		args = append(args, collection)
+		args = append(args, opts.Collection)
 	}
+	dateFilter, dateArgs := dateFilterSQL("d", opts)
+	collectionFilter += dateFilter
+	args = append(args, dateArgs...)
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -58,6 +61,7 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 			d.path,
 			COALESCE(d.title, d.path),
 			COALESCE(c.heading_path, ''),
+			COALESCE(d.doc_timestamp, ''),
 			c.text,
 			cv.vector
 		FROM chunk_vectors cv
@@ -81,7 +85,7 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 		var blob []byte
 		if err := rows.Scan(
 			&r.DocID, &r.ChunkID, &r.Collection, &r.Path,
-			&r.Title, &r.HeadingPath, &r.Snippet, &blob,
+			&r.Title, &r.HeadingPath, &r.Timestamp, &r.Snippet, &blob,
 		); err != nil {
 			return nil, err
 		}

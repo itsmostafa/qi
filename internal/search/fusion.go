@@ -79,6 +79,7 @@ func ReciprocalRankFusion(bm25 []Result, vec []Result, k int) []Result {
 	for _, s := range byChunk {
 		r := s.result
 		r.Score = s.rrfScore
+		r.Scale = ScaleRRF
 		if r.Explain != nil || s.bm25Rank > 0 || s.vecRank > 0 {
 			r.Explain = &ScoreExplain{
 				BM25Score:  s.bm25Sc,

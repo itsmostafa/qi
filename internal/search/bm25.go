@@ -60,11 +60,14 @@ func (b *BM25) Search(ctx context.Context, opts SearchOpts) ([]Result, error) {
 
 func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) ([]Result, error) {
 	var args []any
-	var collectionFilter string
+	var filters string
 	if opts.Collection != "" {
-		collectionFilter = "AND d.collection = ?"
+		filters = "AND d.collection = ?"
 		args = append(args, opts.Collection)
 	}
+	dateFilter, dateArgs := dateFilterSQL("d", opts)
+	filters += dateFilter
+	args = append(args, dateArgs...)
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -74,7 +77,8 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 			d.path,
 			COALESCE(d.title, d.path),
 			COALESCE(c.heading_path, ''),
-			snippet(chunks_fts, 0, '<b>', '</b>', '...', 32),
+			COALESCE(d.doc_timestamp, ''),
+			snippet(chunks_fts, 0, ?, ?, '...', 32),
 			-bm25(chunks_fts)
 		FROM chunks_fts
 		JOIN chunks c ON c.id = chunks_fts.rowid
@@ -84,11 +88,11 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 		  %s
 		ORDER BY bm25(chunks_fts)
 		LIMIT ?
-	`, collectionFilter)
+	`, filters)
 
-	queryArgs := []any{ftsQuery}
+	queryArgs := []any{HighlightOpen, HighlightClose, ftsQuery}
 	queryArgs = append(queryArgs, args...)
-	queryArgs = append(queryArgs, opts.TopK)
+	queryArgs = append(queryArgs, poolSize(opts))
 
 	rows, err := b.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
@@ -103,11 +107,12 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 		var score float64
 		if err := rows.Scan(
 			&r.DocID, &r.ChunkID, &r.Collection, &r.Path,
-			&r.Title, &r.HeadingPath, &r.Snippet, &score,
+			&r.Title, &r.HeadingPath, &r.Timestamp, &r.Snippet, &score,
 		); err != nil {
 			return nil, err
 		}
 		r.Score = score
+		r.Scale = ScaleBM25
 		if opts.Explain {
 			r.Explain = &ScoreExplain{BM25Score: score, BM25Rank: rank}
 		}

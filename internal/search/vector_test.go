@@ -40,7 +40,7 @@ func TestVectorSearch_FiltersByFingerprint(t *testing.T) {
 	}
 
 	vs := NewVectorSearch(database, "fp-current")
-	results, err := vs.Search(ctx, []float32{1, 0, 0, 0}, 10, "")
+	results, err := vs.Search(ctx, []float32{1, 0, 0, 0}, 10, SearchOpts{})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestVectorSearch_EmptyFingerprintReturnsNoResults(t *testing.T) {
 	}
 
 	vs := NewVectorSearch(database, "")
-	results, err := vs.Search(ctx, []float32{1, 0, 0, 0}, 10, "")
+	results, err := vs.Search(ctx, []float32{1, 0, 0, 0}, 10, SearchOpts{})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -85,10 +85,10 @@ func TestVectorSearch_EmptyFingerprintReturnsNoResults(t *testing.T) {
 
 func TestVectorSearchRejectsZeroNormAndNonFiniteQueries(t *testing.T) {
 	vs := NewVectorSearch(openTestDB(t), "fp")
-	if _, err := vs.Search(context.Background(), []float32{0, 0}, 10, ""); err == nil {
+	if _, err := vs.Search(context.Background(), []float32{0, 0}, 10, SearchOpts{}); err == nil {
 		t.Fatal("expected zero-norm query rejection")
 	}
-	if _, err := vs.Search(context.Background(), []float32{1, math.Float32frombits(0x7fc00000)}, 10, ""); err == nil {
+	if _, err := vs.Search(context.Background(), []float32{1, math.Float32frombits(0x7fc00000)}, 10, SearchOpts{}); err == nil {
 		t.Fatal("expected non-finite query rejection")
 	}
 }
@@ -116,7 +116,7 @@ func TestVectorSearch_SkipsMismatchedDimensionDefensively(t *testing.T) {
 	}
 
 	vs := NewVectorSearch(database, "fp-x")
-	results, err := vs.Search(ctx, []float32{1, 0, 0, 0}, 10, "")
+	results, err := vs.Search(ctx, []float32{1, 0, 0, 0}, 10, SearchOpts{})
 	if err != nil {
 		t.Fatalf("Search must not error on a dimension mismatch: %v", err)
 	}
