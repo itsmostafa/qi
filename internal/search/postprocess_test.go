@@ -90,3 +90,17 @@ func TestDateFilterSQL(t *testing.T) {
 		t.Errorf("empty opts produced %q %v", sql, args)
 	}
 }
+
+// -n above the configured bm25_top_k must still return -n results, not the
+// pool size.
+func TestPoolSizeNeverBelowTopK(t *testing.T) {
+	if got := poolSize(SearchOpts{Pool: 50, TopK: 100}); got != 100 {
+		t.Errorf("poolSize = %d, want 100", got)
+	}
+	if got := poolSize(SearchOpts{Pool: 50, TopK: 10}); got != 50 {
+		t.Errorf("poolSize = %d, want 50", got)
+	}
+	if got := poolSize(SearchOpts{}); got != 10 {
+		t.Errorf("poolSize = %d, want the default 10", got)
+	}
+}

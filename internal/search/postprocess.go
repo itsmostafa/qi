@@ -101,13 +101,12 @@ func Finalize(results []Result, opts SearchOpts) []Result {
 }
 
 // poolSize is how many candidates a retriever should fetch before dedupe and
-// capping trim the list down to TopK.
+// capping trim the list down to TopK. Never fewer than TopK: a configured pool
+// smaller than the caller's limit would silently cap the result count.
 func poolSize(opts SearchOpts) int {
-	if opts.Pool > 0 {
-		return opts.Pool
+	n := max(opts.Pool, opts.TopK)
+	if n <= 0 {
+		return 10
 	}
-	if opts.TopK > 0 {
-		return opts.TopK
-	}
-	return 10
+	return n
 }
