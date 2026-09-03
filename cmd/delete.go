@@ -85,9 +85,8 @@ func collectionExistsInDB(ctx context.Context, database *db.DB, name string) (bo
 		SELECT CASE WHEN
 			EXISTS (SELECT 1 FROM documents WHERE collection = ?)
 			OR EXISTS (SELECT 1 FROM index_runs WHERE collection = ?)
-			OR EXISTS (SELECT 1 FROM collections WHERE name = ?)
 		THEN 1 ELSE 0 END
-	`, name, name, name).Scan(&exists)
+	`, name, name).Scan(&exists)
 	if err != nil {
 		return false, err
 	}

@@ -103,8 +103,8 @@ func (db *DB) Ping(ctx context.Context) error {
 
 // DeleteCollection removes all data associated with the given collection name:
 // chunk vectors, embeddings, chunks (FTS triggers keep chunks_fts in sync),
-// documents, index runs, and the collections table row. Orphaned content blobs
-// (not referenced by any remaining document) are also pruned.
+// documents, and index runs. Orphaned content blobs (not referenced by any
+// remaining document) are also pruned.
 func (db *DB) DeleteCollection(ctx context.Context, name string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -145,12 +145,6 @@ func (db *DB) DeleteCollection(ctx context.Context, name string) error {
 		return fmt.Errorf("deleting index_runs: %w", err)
 	}
 
-	// collections table row
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM collections WHERE name = ?`, name); err != nil {
-		return fmt.Errorf("deleting collection row: %w", err)
-	}
-
 	// orphaned content blobs (not referenced by any document)
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM content WHERE hash NOT IN (
@@ -163,7 +157,7 @@ func (db *DB) DeleteCollection(ctx context.Context, name string) error {
 }
 
 // RenameCollectionData merges indexed data from oldName into newName.
-func (db *DB) RenameCollectionData(ctx context.Context, oldName, newName, path string) error {
+func (db *DB) RenameCollectionData(ctx context.Context, oldName, newName string) error {
 	if oldName == "" || oldName == newName {
 		return nil
 	}
@@ -210,18 +204,6 @@ func (db *DB) RenameCollectionData(ctx context.Context, oldName, newName, path s
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE index_runs SET collection = ? WHERE collection = ?`, newName, oldName); err != nil {
 		return fmt.Errorf("renaming index_runs: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM collections WHERE name = ?`, oldName); err != nil {
-		return fmt.Errorf("deleting old collection row: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO collections(name, path, updated_at)
-		VALUES (?, ?, datetime('now'))
-		ON CONFLICT(name) DO UPDATE SET path = excluded.path, updated_at = datetime('now')
-	`, newName, path); err != nil {
-		return fmt.Errorf("upserting collection row: %w", err)
 	}
 
 	if _, err := tx.ExecContext(ctx, `

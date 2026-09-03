@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -51,8 +52,12 @@ type Stats struct {
 
 // Indexer walks a collection and upserts documents into the DB.
 type Indexer struct {
-	db         *db.DB
-	chunker    chunker.Chunker
+	db      *db.DB
+	chunker chunker.Chunker
+	// Force reparses files whose content is unchanged. Change detection is by
+	// content hash, so a parser or chunker fix is otherwise invisible to
+	// everything already indexed.
+	Force      bool
 	beforeRead func(string) // test hook; called after discovery, before secure open
 }
 
@@ -187,7 +192,52 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 	if finishErr := idx.finishRun(ctx, runID, stats, runErr); finishErr != nil {
 		runErr = errors.Join(runErr, fmt.Errorf("finishing index run: %w", finishErr))
 	}
+
+	// Housekeeping is best-effort: a full index run should not fail because the
+	// database could not be compacted afterwards.
+	if err := idx.compact(ctx); err != nil {
+		slog.Warn("compacting database after index run", "error", err)
+	}
 	return stats, runErr
+}
+
+// compact reclaims the space an index run leaves behind. Without it the file
+// only ever grows: FTS5 keeps every segment it has ever written, superseded
+// document bodies are never referenced again, and SQLite hands freed pages to a
+// freelist it never returns to the filesystem.
+func (idx *Indexer) compact(ctx context.Context) error {
+	// A document that changed content leaves its previous body behind, holding
+	// superseded text — including anything since redacted — in the database.
+	if _, err := idx.db.ExecContext(ctx, `
+		DELETE FROM content WHERE hash NOT IN (
+			SELECT DISTINCT content_hash FROM documents
+		)`); err != nil {
+		return fmt.Errorf("pruning orphaned content: %w", err)
+	}
+
+	// FTS5 merges segments only when asked. Reindex cycles otherwise leave
+	// thousands of unmerged segments — 27 MiB of index for 241 chunks, in the
+	// case that prompted this.
+	if _, err := idx.db.ExecContext(ctx,
+		`INSERT INTO chunks_fts(chunks_fts) VALUES('optimize')`); err != nil {
+		return fmt.Errorf("optimizing fts index: %w", err)
+	}
+
+	var pageCount, freelist int64
+	if err := idx.db.QueryRowContext(ctx,
+		`SELECT * FROM pragma_page_count(), pragma_freelist_count()`).Scan(&pageCount, &freelist); err != nil {
+		return fmt.Errorf("reading page counts: %w", err)
+	}
+	// VACUUM rewrites the whole file, so only pay for it once the dead space is
+	// worth reclaiming.
+	if freelist < 1000 || freelist < pageCount/4 {
+		return nil
+	}
+	slog.Info("vacuuming database", "free_pages", freelist, "total_pages", pageCount)
+	if _, err := idx.db.ExecContext(ctx, `VACUUM`); err != nil {
+		return fmt.Errorf("vacuuming: %w", err)
+	}
+	return nil
 }
 
 func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPath string, data []byte, stats *Stats) error {
@@ -204,14 +254,14 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 		return fmt.Errorf("looking up existing document: %w", err)
 	}
 
-	if existingActive == 1 && existingHash == hash {
+	if existingActive == 1 && existingHash == hash && !idx.Force {
 		return nil // unchanged
 	}
 
 	// Fast-path: previously deactivated document restored with byte-identical content.
 	// Reactivate the row without touching chunks or embeddings — deleting chunks would
 	// cascade into chunk_vectors/embeddings (migration 003) and force pointless re-embedding.
-	if docID != 0 && existingActive == 0 && existingHash == hash {
+	if docID != 0 && existingActive == 0 && existingHash == hash && !idx.Force {
 		if _, err := idx.db.ExecContext(ctx,
 			`UPDATE documents SET active=1, updated_at=datetime('now') WHERE id=?`, docID); err != nil {
 			return fmt.Errorf("reactivating document: %w", err)
@@ -241,6 +291,13 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	if title == "" {
 		title = filepath.Base(relPath)
 	}
+	docTime := normalizeDate(doc.Meta.When())
+	var tagsJSON any
+	if len(doc.Meta.Tags) > 0 {
+		if b, err := json.Marshal([]string(doc.Meta.Tags)); err == nil {
+			tagsJSON = string(b)
+		}
+	}
 
 	tx, err := idx.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -252,9 +309,9 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	if docID == 0 {
 		// Insert
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO documents(collection, path, title, content_hash, active, indexed_at, updated_at)
-			 VALUES (?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
-			col.Name, relPath, title, hash)
+			`INSERT INTO documents(collection, path, title, content_hash, doc_timestamp, tags, active, indexed_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
+			col.Name, relPath, title, hash, docTime, tagsJSON)
 		if err != nil {
 			return fmt.Errorf("inserting document: %w", err)
 		}
@@ -263,8 +320,8 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	} else {
 		// Update (or reactivate a previously deactivated document)
 		_, err = tx.ExecContext(ctx,
-			`UPDATE documents SET title=?, content_hash=?, active=1, updated_at=datetime('now') WHERE id=?`,
-			title, hash, docID)
+			`UPDATE documents SET title=?, content_hash=?, doc_timestamp=?, tags=?, active=1, updated_at=datetime('now') WHERE id=?`,
+			title, hash, docTime, tagsJSON, docID)
 		if err != nil {
 			return fmt.Errorf("updating document: %w", err)
 		}
@@ -363,6 +420,26 @@ func (idx *Indexer) finishRun(ctx context.Context, runID int64, stats Stats, run
 		`UPDATE index_runs SET finished_at=datetime('now'), files_scanned=?, files_added=?, files_updated=?, files_removed=?, error=? WHERE id=?`,
 		stats.FilesScanned, stats.FilesAdded, stats.FilesUpdated, stats.FilesRemoved, errStr, runID)
 	return err
+}
+
+// normalizeDate reduces a frontmatter date to YYYY-MM-DD. Anything else is
+// dropped rather than stored in a shape date filters cannot compare.
+func normalizeDate(s string) any {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	for _, layout := range []string{"2006-01-02", time.RFC3339, "2006-01-02 15:04:05"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+	if len(s) >= 10 {
+		if t, err := time.Parse("2006-01-02", s[:10]); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+	return nil
 }
 
 func sha256sum(data []byte) string {

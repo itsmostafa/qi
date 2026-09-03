@@ -34,7 +34,7 @@ func New(ctx context.Context, cfgPath string) (*App, error) {
 		return nil, fmt.Errorf("opening db: %w", err)
 	}
 	for _, col := range normalizableLegacyCollections(cfg.Collections) {
-		if err := database.RenameCollectionData(ctx, col.OriginalName, col.Name, col.Path); err != nil {
+		if err := database.RenameCollectionData(ctx, col.OriginalName, col.Name); err != nil {
 			_ = database.Close()
 			return nil, fmt.Errorf("normalizing collection %q: %w", col.Name, err)
 		}

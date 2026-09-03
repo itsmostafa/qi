@@ -23,7 +23,7 @@ func TestRenameCollectionDataMergesDuplicateDocuments(t *testing.T) {
 		t.Fatalf("inserting index run: %v", err)
 	}
 
-	if err := database.RenameCollectionData(ctx, "old", "new", "/tmp/new"); err != nil {
+	if err := database.RenameCollectionData(ctx, "old", "new"); err != nil {
 		t.Fatalf("renaming collection data: %v", err)
 	}
 
