@@ -68,8 +68,12 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 
 	// Embed the query
 	embeddings, err := h.embedding.Embed(ctx, []string{opts.Query})
-	if err != nil {
-		slog.Warn("embedding query failed, falling back to BM25", "error", err)
+	if err != nil || len(embeddings) == 0 {
+		if err == nil {
+			slog.Warn("embedding provider returned no vectors for query, falling back to BM25")
+		} else {
+			slog.Warn("embedding query failed, falling back to BM25", "error", err)
+		}
 		if opts.TopK > 0 && len(bm25Results) > opts.TopK {
 			bm25Results = bm25Results[:opts.TopK]
 		}

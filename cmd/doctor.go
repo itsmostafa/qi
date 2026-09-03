@@ -75,6 +75,25 @@ var doctorCmd = &cobra.Command{
 			}
 		}
 
+		if cfg != nil && database != nil && cfg.Providers.Embedding != nil {
+			health, err := database.EmbeddingHealth(ctx, cfg.Providers.Embedding.Fingerprint(), cfg.Providers.Embedding.Dimension, "")
+			if err != nil {
+				fmt.Printf("  WARN  embedding health: could not check (%v)\n", err)
+				ok = false
+			} else {
+				status := "OK"
+				if health.Missing+health.Stale+health.Orphaned > 0 {
+					status = "WARN"
+					ok = false
+				}
+				fmt.Printf("  %-4s  embeddings: %d current / %d missing / %d stale / %d orphaned\n",
+					status, health.Current, health.Missing, health.Stale, health.Orphaned)
+				if status == "WARN" && cfg.Providers.Embedding != nil {
+					fmt.Println("        run `qi index` to repair missing, stale, or orphaned embeddings")
+				}
+			}
+		}
+
 		fmt.Println()
 		if ok {
 			fmt.Println("All checks passed.")

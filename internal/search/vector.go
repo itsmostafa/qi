@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 
@@ -14,11 +15,12 @@ import (
 // Embeddings are loaded from the DB and compared in memory.
 // For large corpora, a dedicated vector index (sqlite-vec, etc.) is preferred.
 type VectorSearch struct {
-	db *db.DB
+	db          *db.DB
+	fingerprint string
 }
 
-func NewVectorSearch(database *db.DB) *VectorSearch {
-	return &VectorSearch{db: database}
+func NewVectorSearch(database *db.DB, fingerprint string) *VectorSearch {
+	return &VectorSearch{db: database, fingerprint: fingerprint}
 }
 
 type vecCandidate struct {
@@ -28,12 +30,21 @@ type vecCandidate struct {
 
 // Search returns up to topK results nearest to the query embedding.
 func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, topK int, collection string) ([]Result, error) {
+	if err := validateVector(queryEmbedding); err != nil {
+		return nil, fmt.Errorf("invalid query embedding: %w", err)
+	}
 	if topK <= 0 {
 		topK = 10
 	}
+	if v.fingerprint == "" {
+		// No active embedding config (or, defensively, an unset fingerprint
+		// that would otherwise match every pre-upgrade legacy row). Vector
+		// search is meaningless without a configured embedder.
+		return nil, nil
+	}
 
 	var collectionFilter string
-	var args []any
+	args := []any{v.fingerprint}
 	if collection != "" {
 		collectionFilter = "AND d.collection = ?"
 		args = append(args, collection)
@@ -52,7 +63,9 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 		FROM chunk_vectors cv
 		JOIN chunks c ON c.id = cv.chunk_id
 		JOIN documents d ON d.id = c.doc_id
+		JOIN embeddings em ON em.chunk_id = cv.chunk_id
 		WHERE d.active = 1
+		  AND em.fingerprint = ?
 		  %s
 	`, collectionFilter)
 
@@ -71,6 +84,13 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 			&r.Title, &r.HeadingPath, &r.Snippet, &blob,
 		); err != nil {
 			return nil, err
+		}
+		if err := db.ValidateEmbeddingBlob(blob, len(queryEmbedding)); err != nil {
+			// Defense in depth: fingerprint matching should exclude stale
+			// dimensions, while shared validation also rejects malformed,
+			// non-finite, and zero-norm legacy vectors.
+			slog.Warn("skipping invalid stored vector", "chunk_id", r.ChunkID, "error", err)
+			continue
 		}
 		vec := deserializeFloat32(blob)
 		dist := cosineDistance(queryEmbedding, vec)
@@ -96,6 +116,23 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 		results[i] = r
 	}
 	return results, nil
+}
+
+func validateVector(v []float32) error {
+	if len(v) == 0 {
+		return fmt.Errorf("empty vector")
+	}
+	var norm float64
+	for i, value := range v {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return fmt.Errorf("non-finite value at dimension %d", i)
+		}
+		norm += float64(value) * float64(value)
+	}
+	if norm == 0 {
+		return fmt.Errorf("zero-norm vector")
+	}
+	return nil
 }
 
 // cosineDistance returns 1 - cosine_similarity (range [0, 2]).

@@ -422,6 +422,29 @@ func TestCanonicalPathExpandsHome(t *testing.T) {
 	}
 }
 
+func TestEmbeddingFingerprintChangesWithProviderOrEndpoint(t *testing.T) {
+	base := (&EmbeddingProviderConfig{Name: "local", BaseURL: "HTTP://Example.COM/v1/", Model: "m", Dimension: 4}).Fingerprint()
+	if base == (&EmbeddingProviderConfig{Name: "remote", BaseURL: "HTTP://Example.COM/v1/", Model: "m", Dimension: 4}).Fingerprint() {
+		t.Fatal("provider switch must change fingerprint")
+	}
+	if base == (&EmbeddingProviderConfig{Name: "local", BaseURL: "https://example.com/v1", Model: "m", Dimension: 4}).Fingerprint() {
+		t.Fatal("endpoint switch must change fingerprint")
+	}
+	if base != (&EmbeddingProviderConfig{Name: "local", BaseURL: "http://example.com/v1", Model: "m", Dimension: 4}).Fingerprint() {
+		t.Fatal("cosmetic endpoint casing/trailing slash should be stable")
+	}
+}
+
+func TestLoadRejectsNonPositiveEmbeddingDimension(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("providers:\n  embedding:\n    base_url: http://localhost:1\n    model: m\n    dimension: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected non-positive embedding dimension to be rejected")
+	}
+}
+
 func TestCanonicalPathResolvesSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target")

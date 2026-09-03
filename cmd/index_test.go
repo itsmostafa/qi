@@ -118,7 +118,7 @@ func TestRunIndexEmbedsWhenProviderConfigured(t *testing.T) {
 
 	a := &app.App{
 		Indexer:  indexer.New(database, 256),
-		Embedder: indexer.NewEmbedder(database, testEmbeddingProvider{}),
+		Embedder: indexer.NewEmbedder(database, testEmbeddingProvider{}, "test", "test-fingerprint"),
 	}
 	col := config.Collection{Name: "test", Path: collectionPath, Extensions: []string{".md"}}
 
@@ -145,6 +145,28 @@ func TestRunIndexEmbedsWhenProviderConfigured(t *testing.T) {
 	}
 	if embeddingCount != chunkCount {
 		t.Fatalf("expected embeddings for every chunk, got embeddings=%d chunks=%d", embeddingCount, chunkCount)
+	}
+}
+
+func TestRunIndexPropagatesAllCollectionFailures(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "qi.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	a := &app.App{Indexer: indexer.New(database, 256)}
+	cols := []config.Collection{
+		{Name: "missing-one", Path: filepath.Join(t.TempDir(), "gone-one")},
+		{Name: "missing-two", Path: filepath.Join(t.TempDir(), "gone-two")},
+	}
+	var runErr error
+	captureIndexTestOutput(t, func() { runErr = runIndex(ctx, a, cols) })
+	if runErr == nil {
+		t.Fatal("expected collection failures to propagate")
+	}
+	if !strings.Contains(runErr.Error(), "missing-one") || !strings.Contains(runErr.Error(), "missing-two") {
+		t.Fatalf("expected aggregate error to include both collections, got %v", runErr)
 	}
 }
 

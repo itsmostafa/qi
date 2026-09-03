@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"time"
 
@@ -44,6 +45,9 @@ type embeddingResponse struct {
 }
 
 func (p *embeddingProvider) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if p.cfg.Dimension <= 0 {
+		return nil, fmt.Errorf("embedding dimension must be positive, got %d", p.cfg.Dimension)
+	}
 	batchSize := p.cfg.BatchSize
 	if batchSize <= 0 {
 		batchSize = 32
@@ -116,12 +120,31 @@ func (p *embeddingProvider) embedBatch(ctx context.Context, texts []string) ([][
 		return nil, fmt.Errorf("embedding API error: %s", result.Error.Message)
 	}
 
-	// Sort by index to preserve order
+	// Sort by index to preserve order. Validate bounds, uniqueness, and
+	// dimension so a buggy or incompatible endpoint returns an error instead
+	// of crashing qi or letting a corrupt vector into storage.
 	embeddings := make([][]float32, len(texts))
 	for _, d := range result.Data {
-		if d.Index < len(embeddings) {
-			embeddings[d.Index] = d.Embedding
+		if d.Index < 0 || d.Index >= len(embeddings) {
+			return nil, fmt.Errorf("embedding response index %d out of range for %d inputs", d.Index, len(texts))
 		}
+		if embeddings[d.Index] != nil {
+			return nil, fmt.Errorf("embedding response has duplicate index %d", d.Index)
+		}
+		if len(d.Embedding) != p.cfg.Dimension {
+			return nil, fmt.Errorf("embedding at index %d has dimension %d, expected %d", d.Index, len(d.Embedding), p.cfg.Dimension)
+		}
+		var norm float64
+		for j, value := range d.Embedding {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return nil, fmt.Errorf("embedding at index %d contains non-finite value at dimension %d", d.Index, j)
+			}
+			norm += float64(value) * float64(value)
+		}
+		if norm == 0 {
+			return nil, fmt.Errorf("embedding at index %d has zero norm", d.Index)
+		}
+		embeddings[d.Index] = d.Embedding
 	}
 
 	for i, e := range embeddings {

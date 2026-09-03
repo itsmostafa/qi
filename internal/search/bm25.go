@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/itsmostafa/qi/internal/db"
 )
@@ -25,6 +26,12 @@ func (b *BM25) Search(ctx context.Context, opts SearchOpts) ([]Result, error) {
 
 	// Escape FTS5 query: wrap each token in quotes to avoid syntax errors
 	ftsQuery := sanitizeFTSQuery(opts.Query)
+	if ftsQuery == "" {
+		// Normalization yielded no usable terms (punctuation-only, emoji-only,
+		// or entirely whitespace input). An empty MATCH expression is an
+		// FTS5 syntax error, so return no results rather than touching FTS.
+		return nil, nil
+	}
 	results, err := b.searchFTS(ctx, opts, ftsQuery)
 	if err != nil {
 		return nil, err
@@ -183,9 +190,13 @@ func ftsQueryTermsWithoutDirectives(q string) []string {
 func ftsQueryTermsFiltered(q string, dropDirectives bool) []string {
 	terms := strings.Fields(q)
 
+	// Keep letters, digits, and combining marks from any script — not just
+	// ASCII — so CJK, Cyrillic, Arabic, and accented Latin terms survive
+	// instead of collapsing to "". IsMark matters for decomposed diacritics
+	// (e.g. "e" + combining acute accent).
 	stripPunct := func(t string) string {
 		return strings.Map(func(r rune) rune {
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r) {
 				return r
 			}
 			return -1
