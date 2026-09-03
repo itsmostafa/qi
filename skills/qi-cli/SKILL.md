@@ -108,7 +108,7 @@ Show document counts, chunk counts, embedding counts, and database size per coll
 Health-check config, database, collection paths, and provider connectivity. If the embedding provider shows `SKIP` instead of `OK`, `qi query` will silently fall back to BM25 regardless of your config.
 
 ### `qi update`
-Update the binary from GitHub. If installed via Homebrew, it suggests `brew upgrade qi` instead.
+Update the binary in place from the latest GitHub release.
 
 ---
 
