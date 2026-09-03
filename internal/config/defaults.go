@@ -17,10 +17,6 @@ func SlugFromPath(path string) string {
 	return joinTail(collectionPathParts(path), 1)
 }
 
-// maxNameDepth bounds how many trailing path segments a name may absorb while
-// resolving a collision.
-const maxNameDepth = 8
-
 // AssignCollectionNames names every path, lengthening only those that would
 // otherwise collide. Two "notes" directories become "work-notes" and
 // "personal-notes"; everything else keeps its short name.
@@ -33,7 +29,9 @@ func AssignCollectionNames(paths []string) []string {
 		depth[i] = 1
 	}
 
-	for round := 0; round < maxNameDepth; round++ {
+	// Terminates on its own: depth only ever grows, and only while it is below
+	// the path's own segment count.
+	for {
 		for i := range paths {
 			names[i] = joinTail(parts[i], depth[i])
 		}
@@ -58,10 +56,10 @@ func AssignCollectionNames(paths []string) []string {
 		}
 	}
 
-	// Paths that still collide after maxNameDepth are left identical on purpose:
-	// validate() reports them. A generated numeric suffix would be worse, since
-	// it depends on config order and could silently move one collection's name
-	// onto another's indexed rows.
+	// Paths sharing every segment (the same directory twice) stay identical on
+	// purpose: validate() reports them. A generated numeric suffix would be
+	// worse, since it depends on config order and could silently move one
+	// collection's name onto another's indexed rows.
 	return names
 }
 

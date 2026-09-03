@@ -498,3 +498,24 @@ func TestAssignCollectionNames(t *testing.T) {
 		})
 	}
 }
+
+// A fixed depth cap used to stop lengthening before deep paths diverged,
+// collapsing two distinct collections onto one name.
+func TestAssignCollectionNamesDisambiguatesDeepPaths(t *testing.T) {
+	got := AssignCollectionNames([]string{
+		"/Users/alice/a/b/c/d/e/f/g/h/notes",
+		"/Users/alice/z/b/c/d/e/f/g/h/notes",
+	})
+	if got[0] == got[1] {
+		t.Fatalf("distinct paths collapsed to %q", got[0])
+	}
+}
+
+// Termination must not depend on a round cap: the same path twice shares every
+// segment and can never be disambiguated.
+func TestAssignCollectionNamesTerminatesOnIdenticalPaths(t *testing.T) {
+	got := AssignCollectionNames([]string{"/Users/alice/notes", "/Users/alice/notes"})
+	if got[0] != got[1] {
+		t.Errorf("identical paths got different names: %v", got)
+	}
+}
