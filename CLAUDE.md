@@ -4,7 +4,7 @@ This file is the canonical guidance for AI coding agents working in this repo. `
 
 ## Project Overview
 
-qi is a local-first knowledge search CLI for macOS. It indexes documents (Markdown, plaintext) into a SQLite database and provides BM25 full-text search, vector search (with local embedding providers), and LLM-powered Q&A with citations.
+qi is a local-first knowledge search CLI for macOS. It indexes documents (Markdown, plaintext) into a SQLite database and provides BM25 full-text search and vector search (with local embedding providers).
 
 ## Build
 
@@ -24,7 +24,7 @@ Always run `task check` before finishing any code change to ensure all checks pa
 - **Vector search**: Pure Go KNN with cosine distance stored as BLOBs. sqlite-vec was planned but has WASM compatibility issues with the current go-sqlite3 version — revisit when sqlite-vec-go-bindings updates to support newer go-sqlite3.
 - **Content-addressable storage**: `content` table keyed by SHA-256 hash; `documents` references by hash. Enables deduplication and O(1) change detection.
 - **Break-point chunker**: Scores chunk boundaries by type (heading=100, code fence=80, blank line=20) with distance decay from target size.
-- **Graceful degradation**: Vector search and generation are optional — BM25 always works.
+- **Graceful degradation**: Vector search is optional — BM25 always works.
 - **Auto-generated collection names**: Collection names are derived from full path segments (e.g. `~/Projects/tools/qi` → `tools-qi`). The `--name` flag was removed from `index`; use the derived slug or configure an alias. Legacy names are normalized on startup.
 - **Query relaxation**: BM25 search automatically falls back from conjunctive to disjunctive matching for natural-language queries that return zero results.
 - **Auto-embed on index**: When an embedder is configured, chunks are embedded immediately after indexing without a separate step.
@@ -33,18 +33,18 @@ Always run `task check` before finishing any code change to ensure all checks pa
 ## Package Structure
 
 ```
-cmd/                  Cobra commands (root, init, index, search, query, ask, get, doctor, stats, list, delete, update)
+cmd/                  Cobra commands (root, init, index, search, query, get, doctor, stats, list, delete, update)
 internal/
   app/                Wires config + db + services
   config/             Config loading, defaults, path expansion
   db/                 SQLite open/migrate/WAL, embedding blob storage
-    migrations/       Embedded SQL migrations (001_init.sql, 002_add_chunk_vectors.sql, 003_cascade_chunk_refs.sql)
+    migrations/       Embedded SQL migrations (001_init.sql … 005_drop_llm_cache.sql)
   chunker/            Break-point chunker (chunker.Chunker interface)
   indexer/            Filesystem walker, SHA-256 change detection, embedder
-  output/             Text/JSON formatters (ask results, generic formatter)
+  output/             Text/JSON formatters
   parser/             Document parsers (Markdown via goldmark, plaintext)
-  providers/          HTTP adapters for embedding, rerank, generation APIs
-  search/             BM25, vector KNN, RRF fusion, hybrid, ask, cache, prompt
+  providers/          HTTP adapters for embedding and rerank APIs
+  search/             BM25, vector KNN, RRF fusion, hybrid
   version/            Build-time version injection
 ```
 
@@ -60,7 +60,7 @@ Tests use real in-memory SQLite (no mocking). Provider tests use `httptest.NewSe
 
 ## Adding a New Migration
 
-Add `internal/db/migrations/00N_description.sql` — the runner applies them in alphabetical order. Current migrations: `001_init.sql`, `002_add_chunk_vectors.sql`, `003_cascade_chunk_refs.sql`.
+Add `internal/db/migrations/00N_description.sql` — the runner applies them in alphabetical order and skips versions already recorded in `schema_version`. Current migrations: `001_init.sql` … `005_drop_llm_cache.sql`.
 
 ## sqlite-vec Note
 

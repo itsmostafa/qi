@@ -37,13 +37,6 @@ providers:
   #   base_url: http://localhost:8080
   #   model: bge-reranker-v2-m3
 
-  # Generation provider for `qi ask` (OpenAI-compatible /v1/chat/completions)
-  # generation:
-  #   name: ollama
-  #   base_url: http://localhost:11434
-  #   model: llama3.2
-  #   api_key: ""   # Set for OpenAI-compatible services that require a key
-
 search:
   default_mode: hybrid   # lexical | hybrid | deep
   bm25_top_k: 50         # Candidates from BM25 for fusion

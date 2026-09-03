@@ -13,6 +13,7 @@ func TestMigration004RecoversAfterColumnAddedWithoutVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Early-build state: the ALTER TABLE committed but the marker never was.
 	if _, err := database.ExecContext(ctx, `DELETE FROM schema_version WHERE version = 4`); err != nil {
 		t.Fatal(err)
 	}

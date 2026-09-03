@@ -22,10 +22,9 @@ Save tokens by delegating some of your AI Agent's work to qi. Agent skills inclu
 - **Blazing-fast full-text search** — BM25 via SQLite FTS5, no external search engine required
 - **Flexible vector search** — embeddings stored and queried on your machine; works with Ollama, LM Studio, llama.cpp, or OpenAI's SOTA models.
 - **Hybrid search with RRF fusion** — combines BM25 and vector rankings for results that are both precise and semantically aware
-- **LLM-powered Q&A with citations** — ask questions in plain English and get grounded answers pointing back to your actual documents
 - **Smart chunking** — breakpoint scoring prioritizes headings, code fences, and paragraph boundaries so chunks stay meaningful, not arbitrary
 - **Zero-dependency storage** — a single SQLite file holds your entire index; content-addressable blobs (SHA-256) eliminate duplicates automatically
-- **Works offline, always** — vector search and Q&A are optional enhancements; BM25 search works out of the box with no providers configured
+- **Works offline, always** — vector search is an optional enhancement; BM25 search works out of the box with no providers configured
 
 ## Install
 
@@ -85,12 +84,6 @@ qi query "my query" --mode hybrid
 # Hybrid search a specific collection
 qi query "my query" --mode hybrid -c notes
 
-# Ask a question (requires generation provider)
-qi ask "how does X work?"
-
-# Ask a question to a specific collection
-qi ask "how does X work?" -c notes
-
 # List all collections
 qi list
 
@@ -109,7 +102,6 @@ qi doctor
 | `qi index [path\|collection]` | Index directory (current dir by default) or collection |
 | `qi search <query>` | BM25 full-text search |
 | `qi query <query>` | Hybrid search (BM25 + vector) |
-| `qi ask <question>` | RAG-powered answer with citations |
 | `qi get <id>` | Retrieve document by 6-char hash ID |
 | `qi list` | List all collections |
 | `qi delete <collection>` | Delete a collection and all its indexed data |
@@ -159,20 +151,12 @@ providers:
     model: nomic-embed-text
     dimension: 768
 
-  generation:
-    name: ollama
-    base_url: http://localhost:11434
-    model: llama3.2
-
   # Or: OpenAI cloud (set OPENAI_API_KEY in your environment)
   # embedding:
   #   name: openai
   #   model: text-embedding-3-small
   #   dimension: 1536
   #   batch_size: 32
-  # generation:
-  #   name: openai
-  #   model: gpt-5.4-mini
 ```
 
 ## Document IDs

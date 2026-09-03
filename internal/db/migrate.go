@@ -34,8 +34,8 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 
 	// A write statement before reading schema_version serializes migration
 	// runners across processes. Version 0 is a transaction-local lock row: it
-	// is removed before commit and excluded from the version query. Crucially,
-	// the version is read only after this write lock is held, so waiters observe
+	// is removed before commit and excluded from the applied-set query. Crucially,
+	// the applied set is read only after this write lock is held, so waiters observe
 	// migrations committed by the process ahead of them and cannot rerun 003.
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -46,9 +46,13 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("acquiring migration lock: %w", err)
 	}
 
-	var current int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_version WHERE version > 0`).Scan(&current); err != nil {
-		return fmt.Errorf("reading schema version: %w", err)
+	// Track applied versions as a set rather than a high-water mark: a database
+	// missing one marker must still be able to reconcile it (see the 004
+	// recovery below) without the runner's decision depending on which
+	// migrations happen to sort after it.
+	applied, err := appliedVersions(ctx, tx)
+	if err != nil {
+		return err
 	}
 
 	for _, entry := range entries {
@@ -60,7 +64,7 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 		if err != nil {
 			return fmt.Errorf("parsing migration name %q: %w", name, err)
 		}
-		if ver <= current {
+		if applied[ver] {
 			continue
 		}
 
@@ -85,7 +89,7 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 		if err != nil {
 			return fmt.Errorf("applying migration %s: %w", name, err)
 		}
-		current = ver
+		applied[ver] = true
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM schema_version WHERE version = 0`); err != nil {
@@ -95,6 +99,29 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("committing migrations: %w", err)
 	}
 	return nil
+}
+
+// appliedVersions reads the set of migration versions already recorded.
+// Version 0 is the transaction-local lock row and is excluded.
+func appliedVersions(ctx context.Context, tx *sql.Tx) (map[int]bool, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT version FROM schema_version WHERE version > 0`)
+	if err != nil {
+		return nil, fmt.Errorf("reading schema version: %w", err)
+	}
+	defer rows.Close()
+
+	applied := map[int]bool{}
+	for rows.Next() {
+		var ver int
+		if err := rows.Scan(&ver); err != nil {
+			return nil, fmt.Errorf("reading schema version: %w", err)
+		}
+		applied[ver] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reading schema version: %w", err)
+	}
+	return applied, nil
 }
 
 func columnExists(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {

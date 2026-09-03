@@ -27,16 +27,3 @@ type RerankProvider interface {
 	Rerank(ctx context.Context, query string, passages []string) ([]float64, error)
 	ModelName() string
 }
-
-// GenerationProvider generates text completions.
-type GenerationProvider interface {
-	Complete(ctx context.Context, req CompletionRequest) (string, error)
-	ModelName() string
-}
-
-// CompletionRequest is a chat completion request.
-type CompletionRequest struct {
-	SystemPrompt string
-	UserPrompt   string
-	MaxTokens    int
-}
