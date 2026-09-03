@@ -17,15 +17,23 @@ func init() {
 type markdownParser struct{}
 
 func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
+	meta, body, offset := splitFrontmatter(data)
+
 	md := goldmark.New()
-	reader := text.NewReader(data)
+	reader := text.NewReader(body)
 	node := md.Parser().Parse(reader)
 
-	doc := &Document{}
+	doc := &Document{Meta: meta, Title: meta.Title}
 	var sections []Section
 	var currentHeadings []string
 	var currentBuf strings.Builder
 	var currentOrdinal int
+
+	// Frontmatter is worth retrieving but not worth indexing as YAML: promote it
+	// to a leading section of plain prose instead of leaking syntax into chunks.
+	if summary := meta.Summary(); summary != "" {
+		sections = append(sections, Section{Text: summary, Ordinal: 0})
+	}
 
 	flush := func() {
 		text := strings.TrimSpace(currentBuf.String())
@@ -33,7 +41,7 @@ func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 			sections = append(sections, Section{
 				HeadingPath: strings.Join(currentHeadings, " > "),
 				Text:        text,
-				Ordinal:     currentOrdinal,
+				Ordinal:     currentOrdinal + offset,
 			})
 		}
 		currentBuf.Reset()
@@ -44,7 +52,7 @@ func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 		case *ast.Heading:
 			if entering {
 				flush()
-				headingText := extractText(v, data)
+				headingText := nodeText(v, body)
 				level := v.Level
 				if level == 1 && doc.Title == "" {
 					doc.Title = headingText
@@ -59,18 +67,20 @@ func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 					currentOrdinal = seg.Start
 				}
 			}
-		case *ast.Paragraph, *ast.FencedCodeBlock, *ast.CodeBlock, *ast.Blockquote:
+		case *ast.Paragraph, *ast.FencedCodeBlock, *ast.CodeBlock:
 			if entering {
-				t := extractText(v, data)
-				currentBuf.WriteString(t)
+				currentBuf.WriteString(nodeText(v, body))
 				currentBuf.WriteByte('\n')
 			}
 		case *ast.ListItem:
 			if entering {
-				t := extractText(v, data)
+				// Take the whole item — including any nested list — in one pass
+				// and skip children, or the *ast.Paragraph case above would
+				// emit a loose item's text a second time.
 				currentBuf.WriteString("- ")
-				currentBuf.WriteString(t)
+				currentBuf.WriteString(nodeText(v, body))
 				currentBuf.WriteByte('\n')
+				return ast.WalkSkipChildren, nil
 			}
 		}
 		return ast.WalkContinue, nil
@@ -81,23 +91,38 @@ func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 	return doc, nil
 }
 
-func extractText(n ast.Node, src []byte) string {
+// nodeText returns the text of n and every descendant. Container nodes such as
+// ListItem and Blockquote hold their words several levels down, so scanning
+// direct children alone silently drops them.
+func nodeText(n ast.Node, src []byte) string {
 	var buf bytes.Buffer
-	if n.Lines() != nil {
-		for i := 0; i < n.Lines().Len(); i++ {
-			seg := n.Lines().At(i)
-			buf.Write(seg.Value(src))
+	_ = ast.Walk(n, func(c ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			// Keep block structure readable when several blocks flatten into
+			// one string, as a nested list inside a list item does.
+			if c != n && c.Type() == ast.TypeBlock {
+				buf.WriteByte('\n')
+			}
+			return ast.WalkContinue, nil
 		}
-		return strings.TrimSpace(buf.String())
-	}
-	// Walk children for inline content
-	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
-		if t, ok := child.(*ast.Text); ok {
+		switch t := c.(type) {
+		case *ast.Text:
 			buf.Write(t.Segment.Value(src))
 			if t.SoftLineBreak() || t.HardLineBreak() {
 				buf.WriteByte(' ')
 			}
+		case *ast.String:
+			buf.Write(t.Value)
+		case *ast.AutoLink:
+			buf.Write(t.URL(src))
+		case *ast.FencedCodeBlock, *ast.CodeBlock:
+			lines := c.Lines()
+			for i := 0; i < lines.Len(); i++ {
+				seg := lines.At(i)
+				buf.Write(seg.Value(src))
+			}
 		}
-	}
+		return ast.WalkContinue, nil
+	})
 	return strings.TrimSpace(buf.String())
 }
