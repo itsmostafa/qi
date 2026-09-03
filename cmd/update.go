@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -75,6 +77,9 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	defer os.Remove(extracted)
 
 	if err := replaceExecutable(exe, extracted); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return fmt.Errorf("%s is not writable, re-run with: sudo qi update", filepath.Dir(exe))
+		}
 		return fmt.Errorf("replacing executable: %w", err)
 	}
 
