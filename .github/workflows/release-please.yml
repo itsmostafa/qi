@@ -98,6 +98,7 @@ jobs:
     needs: [release-please, upload-release-assets]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: Verify assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -107,3 +108,5 @@ jobs:
           for asset in qi-darwin-amd64.tar.gz qi-darwin-arm64.tar.gz qi-linux-amd64.tar.gz qi-linux-arm64.tar.gz SHA256SUMS.txt; do
             echo "$ASSETS" | grep -q "^${asset}$" && echo "✓ $asset" || { echo "✗ Missing: $asset"; exit 1; }
           done
+      - name: Verify install.sh end to end
+        run: QI_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
