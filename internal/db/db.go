@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,6 +158,14 @@ func (db *DB) DeleteCollection(ctx context.Context, name string) error {
 }
 
 // RenameCollectionData merges indexed data from oldName into newName.
+//
+// A document is a duplicate only when the destination holds the same relative
+// path AND the same content hash — that is, genuinely the same file indexed
+// under both names. Matching on path alone would delete real documents whenever
+// the destination name happened to be occupied by a different directory that
+// shares a filename, which basename-derived collection names make easy to hit.
+// Documents that cannot move without overwriting a different file are left
+// under oldName, where they stay searchable and can be removed deliberately.
 func (db *DB) RenameCollectionData(ctx context.Context, oldName, newName string) error {
 	if oldName == "" || oldName == newName {
 		return nil
@@ -174,6 +183,7 @@ func (db *DB) RenameCollectionData(ctx context.Context, oldName, newName string)
 				SELECT c.id FROM chunks c
 				JOIN documents old ON old.id = c.doc_id
 				JOIN documents new ON new.collection = ? AND new.path = old.path
+				                  AND new.content_hash = old.content_hash
 				WHERE old.collection = ?
 			)`, newName, oldName); err != nil {
 			return fmt.Errorf("deleting duplicate %s: %w", table, err)
@@ -184,24 +194,45 @@ func (db *DB) RenameCollectionData(ctx context.Context, oldName, newName string)
 		DELETE FROM chunks WHERE doc_id IN (
 			SELECT old.id FROM documents old
 			JOIN documents new ON new.collection = ? AND new.path = old.path
+			                  AND new.content_hash = old.content_hash
 			WHERE old.collection = ?
 		)`, newName, oldName); err != nil {
 		return fmt.Errorf("deleting duplicate chunks: %w", err)
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM documents
-		WHERE collection = ?
-		  AND path IN (SELECT path FROM documents WHERE collection = ?)
+		DELETE FROM documents AS old
+		WHERE old.collection = ?
+		  AND EXISTS (
+			SELECT 1 FROM documents new
+			WHERE new.collection = ? AND new.path = old.path
+			  AND new.content_hash = old.content_hash
+		  )
 	`, oldName, newName); err != nil {
 		return fmt.Errorf("deleting duplicate documents: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE documents SET collection = ? WHERE collection = ?`, newName, oldName); err != nil {
+	// Anything still sharing a path with the destination is a different file.
+	// Leaving it under oldName loses nothing and keeps UNIQUE(collection, path).
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE documents AS old SET collection = ?
+		WHERE old.collection = ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM documents new
+			WHERE new.collection = ? AND new.path = old.path
+		  )`, newName, oldName, newName); err != nil {
 		return fmt.Errorf("renaming documents: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx,
+
+	var stranded int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM documents WHERE collection = ?`, oldName).Scan(&stranded); err != nil {
+		return fmt.Errorf("counting unmoved documents: %w", err)
+	}
+	if stranded > 0 {
+		slog.Warn("collection rename left documents behind: the new name is already used by different files",
+			"old", oldName, "new", newName, "documents", stranded)
+	} else if _, err := tx.ExecContext(ctx,
 		`UPDATE index_runs SET collection = ? WHERE collection = ?`, newName, oldName); err != nil {
 		return fmt.Errorf("renaming index_runs: %w", err)
 	}

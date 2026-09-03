@@ -125,11 +125,13 @@ func appliedVersions(ctx context.Context, tx *sql.Tx) (map[int]bool, error) {
 	return applied, nil
 }
 
-// addedColumns names one column added by each ALTER TABLE migration, used to
-// detect a DDL-committed-but-unversioned state.
+// addedColumns names the LAST column each ALTER TABLE migration adds, used to
+// detect a DDL-committed-but-unversioned state. It must be the last one: an
+// earlier column proves only that the migration started, and treating a torn
+// half as applied would leave the rest of its DDL permanently unrun.
 var addedColumns = map[int]struct{ table, column string }{
 	4: {"embeddings", "fingerprint"},
-	6: {"documents", "doc_timestamp"},
+	6: {"documents", "tags"},
 }
 
 func columnExists(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {

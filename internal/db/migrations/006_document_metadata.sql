@@ -12,3 +12,5 @@ CREATE INDEX IF NOT EXISTS idx_documents_timestamp ON documents(doc_timestamp);
 -- truth for which collections exist; the documents table is the source of truth
 -- for which are indexed.
 DROP TABLE IF EXISTS collections;
+
+INSERT OR IGNORE INTO schema_version(version) VALUES (6);
