@@ -47,7 +47,7 @@ collections:
 | `extensions` | no | File extensions to index; omit to use built-in defaults (`.md .markdown .txt .text`) |
 | `ignore` | no | Directory/file names to skip during indexing |
 
-Collection names are derived from paths, for example `/Users/alice/Projects/tools/qi` becomes `Projects-tools-qi`. Duplicate generated names or duplicate canonical paths are rejected at startup.
+Collection names are the directory's own name, so `/Users/alice/Projects/tools/qi` becomes `qi`. When two collections would share a name, both take on as many leading path segments as it takes to tell them apart: `~/work/notes` and `~/personal/notes` become `work-notes` and `personal-notes`, while unaffected collections keep their short names. Names that still collide, and duplicate canonical paths, are rejected at startup.
 
 ---
 
@@ -149,7 +149,7 @@ embedding:
 
 ### `providers.rerank`
 
-Enables deep search mode (`--mode deep`). Must expose `POST /v1/rerank`.
+Parsed but currently unused: `--mode deep` runs the same path as `--mode hybrid` and no reranker is invoked. The schema is documented here because the config is accepted; the provider must expose `POST /v1/rerank` once reranking lands.
 
 ```yaml
 providers:
@@ -191,7 +191,7 @@ search:
 | `default_mode` | `hybrid` | Search mode used when `--mode` is not passed. `lexical` = BM25 only; `hybrid` = BM25 + vector with RRF fusion; `deep` = hybrid then rerank |
 | `bm25_top_k` | `50` | Candidate count retrieved from BM25 before fusion |
 | `vector_top_k` | `50` | Candidate count retrieved from vector KNN before fusion |
-| `rerank_top_k` | `10` | Top N candidates passed to the reranker in `deep` mode |
+| `rerank_top_k` | `10` | Unused: no reranker is implemented |
 | `rrf_k` | `60` | Reciprocal Rank Fusion constant; higher values reduce the influence of rank position |
 | `chunk_size` | `512` | Target chunk size in characters during indexing |
 | `chunk_overlap` | `64` | Reserved; not used by the current break-point chunker |

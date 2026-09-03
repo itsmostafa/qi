@@ -58,14 +58,14 @@ Semantic/hybrid search. Falls back gracefully to BM25 if the embedding provider 
 qi query "how does auth work"
 qi query "deploy pipeline" --mode lexical   # BM25 only
 qi query "deployment steps" --mode hybrid   # BM25 + vector (default)
-qi query "critical path" --mode deep        # hybrid + reranking
+qi query "critical path" --mode deep        # currently an alias for hybrid; reranking is not implemented
 qi query "question" --explain               # show BM25/vector/RRF score breakdown
 ```
 
 **Modes:**
 - `lexical` — BM25 only
 - `hybrid` (default) — BM25 + vector fused with RRF; skips vector if BM25 has a clear winner
-- `deep` — hybrid + optional reranking pass
+- `deep` — currently identical to `hybrid`. The reranking pass it is meant to add is not implemented, and `providers.rerank` / `rerank_top_k` are read by nothing.
 
 ### `qi get <id>`
 Retrieve a document by its 6-character hash prefix (shown in search results).
@@ -92,7 +92,7 @@ qi delete notes
 Show document counts, chunk counts, embedding counts, and database size per collection. If `Embeddings` count is much lower than `Chunks` count, vector search has no data to work with — re-run `qi index`.
 
 ### `qi doctor`
-Health-check config, database, collection paths, and provider connectivity. If the embedding provider shows `SKIP` instead of `OK`, `qi query` will silently fall back to BM25 regardless of your config.
+Health-check config, database, collection paths, and embedding coverage. It does **not** contact the provider: a `SKIP` line means no embedding provider is configured, not that one is unreachable. When none is configured, `qi query` silently falls back to BM25.
 
 ### `qi update`
 Update the binary in place from the latest GitHub release.
@@ -103,11 +103,23 @@ Update the binary in place from the latest GitHub release.
 
 | Flag | Description |
 |---|---|
-| `-v, --verbose` | Verbose/debug output |
+| `--verbose` | Log debug detail to stderr (no `-v` shorthand; `-v` is `--version` on `qi` itself) |
 | `-f, --format text\|json\|markdown` | Output format (default: text) |
 | `--config <path>` | Override config path |
+
+## `search` and `query` Flags
+
+These are per-command, not global.
+
+| Flag | Description |
+|---|---|
 | `-c, --collection <name>` | Limit to a specific collection |
 | `-n, --limit <N>` | Number of results (default: 10) |
+| `--since YYYY-MM-DD` | Only documents dated on or after this day |
+| `--until YYYY-MM-DD` | Only documents dated on or before this day |
+| `--sort date` | Newest first instead of by relevance |
+
+Dates come from the document's YAML frontmatter `timestamp:` (or `date:`). Documents without one are excluded by `--since`/`--until` and sort last under `--sort date`.
 
 ---
 
@@ -134,7 +146,7 @@ providers:
     dimension: 768
     max_input_chars: 0                    # optional — truncate long texts before embedding (0 = no limit)
 
-  rerank:                                 # optional — enables deep mode
+  rerank:                                 # parsed but unused: reranking is not implemented
     base_url: http://localhost:8080
     model: bge-reranker-v2-m3
 
@@ -179,7 +191,7 @@ providers:
 - **BM25** — SQLite FTS5. Always available, very fast, good for keyword queries.
 - **Vector KNN** — Cosine similarity over embedding BLOBs in SQLite. Requires an embedding provider. Captures semantic intent.
 - **Hybrid (RRF)** — Runs both, fuses rankings with Reciprocal Rank Fusion (`score = Σ 1/(k + rank)`). Skips vector if BM25 has a dominant winner (top score > 3× second place).
-- **Deep** — Hybrid + a second-pass reranker for best accuracy.
+- **Deep** — Accepted, but identical to Hybrid today. No reranker runs.
 
 ---
 
@@ -215,7 +227,7 @@ qi query "how does X work" --explain
 
 **Debug / inspect:**
 ```bash
-qi doctor                         # check all providers are reachable
+qi doctor                         # check config, database, and embedding coverage
 qi stats                          # see document/chunk/embedding counts
 qi query "question" --explain     # see score breakdown
 qi get abc123                     # read the full source document
