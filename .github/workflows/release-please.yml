@@ -98,6 +98,7 @@ jobs:
     needs: [release-please, upload-release-assets]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: Verify assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -107,38 +108,5 @@ jobs:
           for asset in qi-darwin-amd64.tar.gz qi-darwin-arm64.tar.gz qi-linux-amd64.tar.gz qi-linux-arm64.tar.gz SHA256SUMS.txt; do
             echo "$ASSETS" | grep -q "^${asset}$" && echo "✓ $asset" || { echo "✗ Missing: $asset"; exit 1; }
           done
-
-  update-homebrew-formula:
-    needs: [release-please, upload-release-assets]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout qi repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          token: ${{ github.token }}
-
-      - name: Compute source tarball SHA256
-        id: sha256
-        run: |
-          TAG="${{ needs.release-please.outputs.tag_name }}"
-          SHA256=$(curl -sL "https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz" | sha256sum | awk '{print $1}')
-          echo "source=${SHA256}" >> "$GITHUB_OUTPUT"
-
-      - name: Update formula
-        run: |
-          TAG="${{ needs.release-please.outputs.tag_name }}"
-          FORMULA="HomebrewFormula/qi.rb"
-          sed -i "s|url \".*\"|url \"https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz\"|" "$FORMULA"
-          sed -i "s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.source }}\"/" "$FORMULA"
-          cat "$FORMULA"
-
-      - name: Commit and push
-        run: |
-          TAG="${{ needs.release-please.outputs.tag_name }}"
-          VERSION="${TAG#v}"
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add HomebrewFormula/qi.rb
-          git diff --cached --quiet && echo "No changes to commit" && exit 0
-          git commit -m "chore: update Homebrew formula to ${VERSION}"
-          git push
+      - name: Verify install.sh end to end
+        run: QI_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh

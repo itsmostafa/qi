@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -30,11 +32,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("finding current executable: %w", err)
 	}
-	if isHomebrewInstall(exe) {
-		fmt.Println("qi was installed via Homebrew. Update with: brew upgrade qi")
-		return nil
-	}
-
 	release, err := fetchLatestRelease()
 	if err != nil {
 		return fmt.Errorf("fetching latest release: %w", err)
@@ -80,20 +77,14 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	defer os.Remove(extracted)
 
 	if err := replaceExecutable(exe, extracted); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return fmt.Errorf("%s is not writable, re-run with: sudo qi update", filepath.Dir(exe))
+		}
 		return fmt.Errorf("replacing executable: %w", err)
 	}
 
 	fmt.Printf("Updated to %s. Run `qi version` to confirm.\n", latest)
 	return nil
-}
-
-func isHomebrewInstall(path string) bool {
-	for _, prefix := range []string{"/opt/homebrew/", "/usr/local/Cellar/", "/usr/local/opt/", "/home/linuxbrew/"} {
-		if strings.HasPrefix(path, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 type githubRelease struct {
