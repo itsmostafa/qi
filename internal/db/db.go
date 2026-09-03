@@ -9,8 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ncruces/go-sqlite3"
 	_ "github.com/ncruces/go-sqlite3/driver"
+	"github.com/ncruces/go-sqlite3/ext/fts5"
 )
+
+// FTS5 is an opt-in extension since go-sqlite3 v0.35; register it on every connection.
+func init() { sqlite3.AutoExtension(fts5.Register) }
 
 // DB wraps a *sql.DB with qi-specific helpers.
 type DB struct {
