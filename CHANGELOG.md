@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.10.0](https://github.com/itsmostafa/qi/compare/v0.9.1...v0.10.0) (2026-09-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **install:** `brew install qi` is no longer supported. Existing Homebrew users should run `brew uninstall qi` and reinstall with the install script.
+
+### Features
+
+* **install:** add install.sh for one-line binary installation ([04bb3a3](https://github.com/itsmostafa/qi/commit/04bb3a36ac6dc00856047b97929fc0fccfaff5bf))
+* **install:** remove Homebrew support ([10c7ec1](https://github.com/itsmostafa/qi/commit/10c7ec126e97774274078e6d4482976c14cbc68a))
+* **install:** replace Homebrew with an install.sh script ([0eb5b93](https://github.com/itsmostafa/qi/commit/0eb5b9377aac789fb04ab56cbd103d5734513ecd))
+
+
+### Bug Fixes
+
+* **update:** point at sudo when the install directory is not writable ([b4a2695](https://github.com/itsmostafa/qi/commit/b4a269587c291749eb33d76be09b187e915c2b93))
+
 ## [0.9.1](https://github.com/itsmostafa/qi/compare/v0.9.0...v0.9.1) (2026-09-03)
 
 
