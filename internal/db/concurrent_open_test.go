@@ -54,6 +54,7 @@ func TestConcurrentFreshDatabaseOpens(t *testing.T) {
 				t.Fatalf("final open: %v", err)
 			}
 			defer database.Close()
+			assertDBCount(t, database, `PRAGMA busy_timeout`, int(busyTimeout.Milliseconds()))
 			assertDBCount(t, database, `SELECT COUNT(*) FROM collections`, 8)
 			assertDBCount(t, database, `SELECT COUNT(*) FROM schema_version WHERE version BETWEEN 1 AND 4`, 4)
 			assertDBCount(t, database, `SELECT COUNT(*) FROM schema_version WHERE version = 0`, 0)

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/ncruces/go-sqlite3"
-	_ "github.com/ncruces/go-sqlite3/driver"
+	"github.com/ncruces/go-sqlite3/driver"
 	"github.com/ncruces/go-sqlite3/ext/fts5"
 )
 
@@ -29,21 +29,20 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		return nil, fmt.Errorf("creating db dir: %w", err)
 	}
 
-	sqlDB, err := sql.Open("sqlite3", path)
+	// busy_timeout is set in the connection init hook, which the driver runs
+	// before any statement: database/sql connects lazily, so a PRAGMA statement
+	// here would itself be the one to fail BUSY.
+	sqlDB, err := driver.Open(path, func(c *sqlite3.Conn) error {
+		return c.BusyTimeout(busyTimeout)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite3: %w", err)
 	}
 
-	// Single writer per process, plus a bounded cross-process wait before any
-	// lock-prone initialization. This must precede journal-mode setup and
-	// migrations so simultaneous first starts wait instead of failing BUSY.
+	// Single writer per process.
 	sqlDB.SetMaxOpenConns(1)
-	if _, err := sqlDB.ExecContext(ctx, `PRAGMA busy_timeout=10000`); err != nil {
-		_ = sqlDB.Close()
-		return nil, fmt.Errorf("setting SQLite busy timeout: %w", err)
-	}
 
-	if err := execBusyRetry(ctx, sqlDB, `PRAGMA journal_mode=WAL`, 10*time.Second); err != nil {
+	if err := execBusyRetry(ctx, sqlDB, `PRAGMA journal_mode=WAL`, busyTimeout); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("enabling WAL: %w", err)
 	}
@@ -62,6 +61,13 @@ func Open(ctx context.Context, path string) (*DB, error) {
 
 	return db, nil
 }
+
+// busyTimeout bounds how long SQLite waits for a competing process before
+// returning SQLITE_BUSY. It also bounds the journal-mode retry window below.
+// Setting it explicitly is deliberate: the driver's own 1-minute default is
+// skipped whenever any "_pragma" is given in the connection string, so relying
+// on it would drop the timeout to zero the day one is added for another reason.
+const busyTimeout = 10 * time.Second
 
 // journal_mode can return SQLITE_BUSY immediately even with busy_timeout, so
 // retry lock failures within the same bounded initialization window.
