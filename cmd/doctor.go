@@ -70,9 +70,6 @@ var doctorCmd = &cobra.Command{
 			if cfg.Providers.Embedding == nil {
 				fmt.Println("  SKIP  embedding provider (not configured)")
 			}
-			if cfg.Providers.Generation == nil {
-				fmt.Println("  SKIP  generation provider (not configured)")
-			}
 		}
 
 		if cfg != nil && database != nil && cfg.Providers.Embedding != nil {

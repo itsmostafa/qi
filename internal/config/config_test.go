@@ -116,119 +116,79 @@ collections:
 	}
 }
 
-func TestLoad_OpenAIGeneration_EnvKey(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "sk-test-gen")
-	path := writeTempConfig(t, `
-collections:
-  - name: docs
-    path: /tmp
-providers:
-  generation:
-    name: openai
-    model: gpt-4o-mini
-`)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
+func TestLoad_OpenAIEnvOverrides(t *testing.T) {
+	tests := []struct {
+		name        string
+		envKey      string
+		provider    string
+		wantBaseURL string
+		wantAPIKey  string
+	}{
+		{
+			name:   "openai fills base_url and key from env",
+			envKey: "sk-test-emb",
+			provider: `    name: openai
+    model: text-embedding-3-small
+    dimension: 1536`,
+			wantBaseURL: "https://api.openai.com",
+			wantAPIKey:  "sk-test-emb",
+		},
+		{
+			name:   "config key wins over env",
+			envKey: "sk-from-env",
+			provider: `    name: openai
+    model: text-embedding-3-small
+    dimension: 1536
+    api_key: sk-from-config`,
+			wantBaseURL: "https://api.openai.com",
+			wantAPIKey:  "sk-from-config",
+		},
+		{
+			name:   "explicit base_url is preserved",
+			envKey: "sk-test",
+			provider: `    name: openai
+    model: text-embedding-3-small
+    dimension: 1536
+    base_url: https://custom.proxy.example.com`,
+			wantBaseURL: "https://custom.proxy.example.com",
+			wantAPIKey:  "sk-test",
+		},
+		{
+			name:   "env key does not apply to non-openai providers",
+			envKey: "sk-should-not-apply",
+			provider: `    name: ollama
+    base_url: http://localhost:11434
+    model: nomic-embed-text
+    dimension: 768`,
+			wantBaseURL: "http://localhost:11434",
+			wantAPIKey:  "",
+		},
 	}
-	if cfg.Providers.Generation == nil {
-		t.Fatal("expected generation provider")
-	}
-	if cfg.Providers.Generation.BaseURL != "https://api.openai.com" {
-		t.Errorf("expected base_url=https://api.openai.com, got %q", cfg.Providers.Generation.BaseURL)
-	}
-	if cfg.Providers.Generation.APIKey != "sk-test-gen" {
-		t.Errorf("expected api_key=sk-test-gen, got %q", cfg.Providers.Generation.APIKey)
-	}
-}
 
-func TestLoad_OpenAIEmbedding_EnvKey(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "sk-test-emb")
-	path := writeTempConfig(t, `
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OPENAI_API_KEY", tt.envKey)
+			path := writeTempConfig(t, `
 collections:
   - name: docs
     path: /tmp
 providers:
   embedding:
-    name: openai
-    model: text-embedding-3-small
-    dimension: 1536
-`)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-	if cfg.Providers.Embedding == nil {
-		t.Fatal("expected embedding provider")
-	}
-	if cfg.Providers.Embedding.BaseURL != "https://api.openai.com" {
-		t.Errorf("expected base_url=https://api.openai.com, got %q", cfg.Providers.Embedding.BaseURL)
-	}
-	if cfg.Providers.Embedding.APIKey != "sk-test-emb" {
-		t.Errorf("expected api_key=sk-test-emb, got %q", cfg.Providers.Embedding.APIKey)
-	}
-}
-
-func TestLoad_OpenAI_ConfigKeyTakesPrecedence(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "sk-from-env")
-	path := writeTempConfig(t, `
-collections:
-  - name: docs
-    path: /tmp
-providers:
-  generation:
-    name: openai
-    model: gpt-4o
-    api_key: sk-from-config
-`)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-	if cfg.Providers.Generation.APIKey != "sk-from-config" {
-		t.Errorf("config key should win over env, got %q", cfg.Providers.Generation.APIKey)
-	}
-}
-
-func TestLoad_OpenAI_ExplicitBaseURLPreserved(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "sk-test")
-	path := writeTempConfig(t, `
-collections:
-  - name: docs
-    path: /tmp
-providers:
-  generation:
-    name: openai
-    model: gpt-4o
-    base_url: https://custom.proxy.example.com
-`)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-	if cfg.Providers.Generation.BaseURL != "https://custom.proxy.example.com" {
-		t.Errorf("explicit base_url should be preserved, got %q", cfg.Providers.Generation.BaseURL)
-	}
-}
-
-func TestLoad_NonOpenAI_NoEnvKey(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "sk-should-not-apply")
-	path := writeTempConfig(t, `
-collections:
-  - name: docs
-    path: /tmp
-providers:
-  generation:
-    name: ollama
-    base_url: http://localhost:11434
-    model: llama3.2
-`)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-	if cfg.Providers.Generation.APIKey != "" {
-		t.Errorf("OPENAI_API_KEY should not apply to non-openai providers, got %q", cfg.Providers.Generation.APIKey)
+`+tt.provider+"\n")
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load failed: %v", err)
+			}
+			if cfg.Providers.Embedding == nil {
+				t.Fatal("expected embedding provider")
+			}
+			if cfg.Providers.Embedding.BaseURL != tt.wantBaseURL {
+				t.Errorf("base_url = %q, want %q", cfg.Providers.Embedding.BaseURL, tt.wantBaseURL)
+			}
+			if cfg.Providers.Embedding.APIKey != tt.wantAPIKey {
+				t.Errorf("api_key = %q, want %q", cfg.Providers.Embedding.APIKey, tt.wantAPIKey)
+			}
+		})
 	}
 }
 

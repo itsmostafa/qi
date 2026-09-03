@@ -20,8 +20,6 @@ type App struct {
 	BM25      *search.BM25
 	Vector    *search.VectorSearch
 	Hybrid    *search.Hybrid
-	Asker     *search.Asker
-	Generator providers.GenerationProvider // nil if not configured
 }
 
 // New opens the database and wires all services.
@@ -64,15 +62,6 @@ func New(ctx context.Context, cfgPath string) (*App, error) {
 		}
 		a.Embedder = indexer.NewEmbedder(database, embProvider, providerTag, fingerprint)
 		a.Hybrid = search.NewHybrid(a.BM25, a.Vector, embProvider, cfg.Search)
-	}
-
-	if cfg.Providers.Generation != nil {
-		a.Generator = providers.NewGeneration(cfg.Providers.Generation)
-		topK := cfg.Search.RerankTopK
-		if topK <= 0 {
-			topK = 10
-		}
-		a.Asker = search.NewAsker(a.Hybrid, a.BM25, a.Generator, database, topK)
 	}
 
 	return a, nil

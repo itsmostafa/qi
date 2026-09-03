@@ -56,17 +56,9 @@ type RerankProviderConfig struct {
 	Model   string `yaml:"model"`
 }
 
-type GenerationProviderConfig struct {
-	Name    string `yaml:"name"`
-	BaseURL string `yaml:"base_url"`
-	Model   string `yaml:"model"`
-	APIKey  string `yaml:"api_key,omitempty"`
-}
-
 type Providers struct {
-	Embedding  *EmbeddingProviderConfig  `yaml:"embedding,omitempty"`
-	Rerank     *RerankProviderConfig     `yaml:"rerank,omitempty"`
-	Generation *GenerationProviderConfig `yaml:"generation,omitempty"`
+	Embedding *EmbeddingProviderConfig `yaml:"embedding,omitempty"`
+	Rerank    *RerankProviderConfig    `yaml:"rerank,omitempty"`
 }
 
 type SearchConfig struct {
@@ -157,10 +149,6 @@ func (c *Config) expandEnvVars() {
 		emb.APIKey = os.ExpandEnv(emb.APIKey)
 		emb.BaseURL = os.ExpandEnv(emb.BaseURL)
 	}
-	if gen := c.Providers.Generation; gen != nil {
-		gen.APIKey = os.ExpandEnv(gen.APIKey)
-		gen.BaseURL = os.ExpandEnv(gen.BaseURL)
-	}
 	if rer := c.Providers.Rerank; rer != nil {
 		rer.BaseURL = os.ExpandEnv(rer.BaseURL)
 	}
@@ -177,15 +165,6 @@ func (c *Config) applyEnvOverrides() {
 		}
 		if emb.APIKey == "" {
 			emb.APIKey = apiKey
-		}
-	}
-
-	if gen := c.Providers.Generation; gen != nil && gen.Name == "openai" {
-		if gen.BaseURL == "" {
-			gen.BaseURL = openAIBaseURL
-		}
-		if gen.APIKey == "" {
-			gen.APIKey = apiKey
 		}
 	}
 }

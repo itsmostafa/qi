@@ -18,7 +18,7 @@ var (
 var rootCmd = &cobra.Command{
 	Use:          "qi",
 	Short:        "Local-first knowledge search",
-	Long:         `qi indexes your local documents and lets you search, query, and ask questions using BM25 and vector search.`,
+	Long:         `qi indexes your local documents and lets you search and query them using BM25 and vector search.`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if showVersion {
@@ -45,7 +45,6 @@ func init() {
 	rootCmd.AddCommand(indexCmd)
 	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(queryCmd)
-	rootCmd.AddCommand(askCmd)
 	rootCmd.AddCommand(getCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(statsCmd)

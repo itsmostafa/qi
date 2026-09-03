@@ -111,17 +111,6 @@ providers:
   #   model: text-embedding-3-small
   #   dimension: 1536
 
-  # Uncomment to enable LLM generation (llama.cpp / Ollama compatible)
-  # generation:
-  #   name: ollama
-  #   base_url: http://localhost:11434
-  #   model: llama3.2
-
-  # Or use OpenAI generation — set OPENAI_API_KEY in your environment
-  # generation:
-  #   name: openai
-  #   model: gpt-5.4-mini
-
 search:
   default_mode: hybrid   # lexical | hybrid | deep
   bm25_top_k: 50
