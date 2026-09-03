@@ -119,7 +119,7 @@ These are per-command, not global.
 | `--until YYYY-MM-DD` | Only documents dated on or before this day |
 | `--sort date` | Newest first instead of by relevance |
 
-Dates come from the document's YAML frontmatter `timestamp:` (or `date:`). Documents without one are excluded by `--since`/`--until` and sort last under `--sort date`.
+Dates come from the document's YAML frontmatter `timestamp:`. Documents without one are excluded by `--since`/`--until` and sort last under `--sort date`.
 
 ---
 

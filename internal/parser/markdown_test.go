@@ -81,8 +81,8 @@ func TestFrontmatterTitleBeatsHeading(t *testing.T) {
 	if doc.Title != "Thyroid Panel" {
 		t.Errorf("Title = %q, want %q", doc.Title, "Thyroid Panel")
 	}
-	if doc.Meta.When() != "2026-07-17" {
-		t.Errorf("When() = %q, want 2026-07-17", doc.Meta.When())
+	if doc.Meta.Timestamp != "2026-07-17" {
+		t.Errorf("Timestamp = %q, want 2026-07-17", doc.Meta.Timestamp)
 	}
 	if len(doc.Meta.Tags) != 2 || doc.Meta.Tags[0] != "biomarker" {
 		t.Errorf("Tags = %v", doc.Meta.Tags)
@@ -141,5 +141,40 @@ func TestMalformedFrontmatterIsTreatedAsContent(t *testing.T) {
 		if !strings.Contains(bodyText(doc), "text") {
 			t.Errorf("%s: body lost:\n%s", name, bodyText(doc))
 		}
+	}
+}
+
+// A plain []string cannot decode `tags: personal`, and an unmarshal error used
+// to un-strip the block, putting the raw YAML back into the chunk.
+func TestScalarTagsDoNotLeakFrontmatter(t *testing.T) {
+	doc := parseMD(t, "---\ntitle: T\ntags: personal\n---\n\n# H\n\nbody\n")
+	if len(doc.Meta.Tags) != 1 || doc.Meta.Tags[0] != "personal" {
+		t.Errorf("Tags = %v, want [personal]", doc.Meta.Tags)
+	}
+	if got := bodyText(doc); strings.Contains(got, "tags:") {
+		t.Errorf("scalar tags leaked frontmatter into the body:\n%s", got)
+	}
+}
+
+func TestFlowSequenceTags(t *testing.T) {
+	doc := parseMD(t, "---\ntags: [book, summary]\n---\n\n# H\n\nbody\n")
+	if len(doc.Meta.Tags) != 2 {
+		t.Errorf("flow sequence tags = %v, want 2 entries", doc.Meta.Tags)
+	}
+}
+
+// Delimiters, not decodability, decide what is frontmatter. YAML that does not
+// fit Meta yields no metadata but must still be stripped, or the raw block —
+// keys, secrets and all — reaches the index. A tag list keeps the closing ---
+// from being read as a setext underline, so the leak lands in chunk text.
+func TestUndecodableFrontmatterIsStillStripped(t *testing.T) {
+	doc := parseMD(t, "---\ntitle: [bad]\nsecret: hunter2\ntags:\n- a\n---\n\n# Heading\n\nreal body\n")
+	for _, s := range doc.Sections {
+		if strings.Contains(s.Text, "hunter2") || strings.Contains(s.HeadingPath, "hunter2") {
+			t.Fatalf("undecodable frontmatter leaked into the index: %q / %q", s.HeadingPath, s.Text)
+		}
+	}
+	if !strings.Contains(bodyText(doc), "real body") {
+		t.Error("body lost")
 	}
 }

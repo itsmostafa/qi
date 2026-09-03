@@ -12,16 +12,7 @@ type Meta struct {
 	Title       string     `yaml:"title"`
 	Description string     `yaml:"description"`
 	Timestamp   string     `yaml:"timestamp"`
-	Date        string     `yaml:"date"`
 	Tags        stringList `yaml:"tags"`
-}
-
-// When returns the document's own date, preferring "timestamp" over "date".
-func (m Meta) When() string {
-	if m.Timestamp != "" {
-		return m.Timestamp
-	}
-	return m.Date
 }
 
 // Summary renders the retrieval-worthy frontmatter as plain prose. It is empty
@@ -79,8 +70,11 @@ func splitFrontmatter(data []byte) (Meta, []byte, int) {
 		}
 		switch strings.TrimRight(string(line), "\r") {
 		case "---", "...":
+			// A closed block is frontmatter whether or not it decodes. YAML we
+			// cannot read yields no metadata, but indexing it as prose would
+			// put the raw block — keys, secrets and all — back into the chunk.
 			if err := yaml.Unmarshal(rest[:off], &meta); err != nil {
-				return Meta{}, data, 0 // malformed: index it as content
+				meta = Meta{}
 			}
 			return meta, rest[next:], open + next
 		}

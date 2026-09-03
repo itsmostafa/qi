@@ -291,7 +291,7 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	if title == "" {
 		title = filepath.Base(relPath)
 	}
-	docTime := normalizeDate(doc.Meta.When())
+	docTime := normalizeDate(doc.Meta.Timestamp)
 	var tagsJSON any
 	if len(doc.Meta.Tags) > 0 {
 		if b, err := json.Marshal([]string(doc.Meta.Tags)); err == nil {
