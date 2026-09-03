@@ -12,7 +12,7 @@ import (
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Check configuration, database, and provider health",
+	Short: "Check configuration, database, collection paths, and embedding coverage",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ok := true
 		check := func(label string, err error) {
