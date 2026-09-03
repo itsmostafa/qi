@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/itsmostafa/qi/compare/v0.10.0...v0.11.0) (2026-09-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* `qi ask` is removed. A `providers.generation` section in an existing config is now ignored rather than rejected, so configs keep loading, but the command and its output formats are gone.
+
+### Features
+
+* remove the ask command and generation provider ([ede05be](https://github.com/itsmostafa/qi/commit/ede05be4362f0c0ba8a726f0af720da610b4a4d3))
+* remove the qi ask command ([5ab2bcd](https://github.com/itsmostafa/qi/commit/5ab2bcd872c1992f36e2070315f10f9a4cd15d93))
+
 ## [0.10.0](https://github.com/itsmostafa/qi/compare/v0.9.1...v0.10.0) (2026-09-03)
 
 
