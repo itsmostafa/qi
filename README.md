@@ -33,8 +33,8 @@ Save tokens by delegating some of your AI Agent's work to qi. Agent skills inclu
 curl -fsSL https://raw.githubusercontent.com/itsmostafa/qi/main/install.sh | sh
 ```
 
-The script detects your OS and architecture, verifies the SHA-256 checksum, and installs the
-latest release to `~/.local/bin`. Set `QI_INSTALL_DIR` to install elsewhere.
+The script detects your OS and architecture, and installs the
+latest release.
 Run `qi update` later to upgrade in place.
 
 Or via `go install`:
