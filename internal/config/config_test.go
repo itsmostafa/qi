@@ -438,17 +438,17 @@ func TestSlugFromPath(t *testing.T) {
 		{
 			name: "mac user project path",
 			path: "/Users/alice/Projects/tools/qi",
-			want: "Projects-tools-qi",
+			want: "qi",
 		},
 		{
 			name: "linux user project path",
 			path: "/home/alice/Projects/tools/qi",
-			want: "Projects-tools-qi",
+			want: "qi",
 		},
 		{
 			name: "spaces and punctuation",
 			path: "/tmp/My Notes/docs.v1",
-			want: "tmp-My-Notes-docs-v1",
+			want: "docs-v1",
 		},
 		{
 			name: "root fallback",
@@ -460,6 +460,40 @@ func TestSlugFromPath(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := SlugFromPath(tt.path); got != tt.want {
 				t.Fatalf("SlugFromPath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAssignCollectionNames(t *testing.T) {
+	tests := []struct {
+		name  string
+		paths []string
+		want  []string
+	}{
+		{
+			name:  "distinct basenames stay short",
+			paths: []string{"/Users/alice/Projects/tools/qi", "/Users/alice/Documents/health"},
+			want:  []string{"qi", "health"},
+		},
+		{
+			name:  "collision lengthens only the collided",
+			paths: []string{"/Users/alice/work/notes", "/Users/alice/personal/notes", "/Users/alice/qi"},
+			want:  []string{"work-notes", "personal-notes", "qi"},
+		},
+		{
+			name:  "lengthens until distinct",
+			paths: []string{"/Users/alice/a/x/notes", "/Users/alice/b/x/notes"},
+			want:  []string{"a-x-notes", "b-x-notes"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AssignCollectionNames(tt.paths)
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("names[%d] = %q, want %q (all: %v)", i, got[i], tt.want[i], got)
+				}
 			}
 		})
 	}

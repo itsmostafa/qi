@@ -114,13 +114,20 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// normalizeCollectionNames replaces configured names with generated ones,
+// remembering the old name so indexed rows can be migrated. Names are assigned
+// together because uniqueness is a property of the set, not of one path.
 func (c *Config) normalizeCollectionNames() {
+	paths := make([]string, len(c.Collections))
 	for i := range c.Collections {
-		generated := SlugFromPath(c.Collections[i].Path)
-		if c.Collections[i].Name != "" && c.Collections[i].Name != generated {
+		paths[i] = c.Collections[i].Path
+	}
+	generated := AssignCollectionNames(paths)
+	for i := range c.Collections {
+		if c.Collections[i].Name != "" && c.Collections[i].Name != generated[i] {
 			c.Collections[i].OriginalName = c.Collections[i].Name
 		}
-		c.Collections[i].Name = generated
+		c.Collections[i].Name = generated[i]
 	}
 }
 

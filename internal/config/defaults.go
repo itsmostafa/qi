@@ -9,14 +9,71 @@ import (
 
 var nonAlphanumRe = regexp.MustCompile(`[^A-Za-z0-9]+`)
 
-// SlugFromPath returns a stable collection name derived from a filesystem path.
+// SlugFromPath returns a collection name derived from a filesystem path. It is
+// the directory's own name: a full-path slug produced names too long to type
+// after -c, such as Library-Mobile-Documents-iCloud-md-obsidian-Documents-health.
+// Use AssignCollectionNames when several paths must stay distinguishable.
 func SlugFromPath(path string) string {
-	parts := collectionPathParts(path)
-	slug := strings.Join(parts, "-")
-	slug = nonAlphanumRe.ReplaceAllString(slug, "-")
-	slug = strings.Trim(slug, "-")
+	return joinTail(collectionPathParts(path), 1)
+}
+
+// maxNameDepth bounds how many trailing path segments a name may absorb while
+// resolving a collision.
+const maxNameDepth = 8
+
+// AssignCollectionNames names every path, lengthening only those that would
+// otherwise collide. Two "notes" directories become "work-notes" and
+// "personal-notes"; everything else keeps its short name.
+func AssignCollectionNames(paths []string) []string {
+	parts := make([][]string, len(paths))
+	depth := make([]int, len(paths))
+	names := make([]string, len(paths))
+	for i, p := range paths {
+		parts[i] = collectionPathParts(p)
+		depth[i] = 1
+	}
+
+	for round := 0; round < maxNameDepth; round++ {
+		for i := range paths {
+			names[i] = joinTail(parts[i], depth[i])
+		}
+		groups := map[string][]int{}
+		for i, n := range names {
+			groups[n] = append(groups[n], i)
+		}
+		deepened := false
+		for _, idxs := range groups {
+			if len(idxs) < 2 {
+				continue
+			}
+			for _, i := range idxs {
+				if depth[i] < len(parts[i]) {
+					depth[i]++
+					deepened = true
+				}
+			}
+		}
+		if !deepened {
+			break
+		}
+	}
+
+	// Paths that still collide after maxNameDepth are left identical on purpose:
+	// validate() reports them. A generated numeric suffix would be worse, since
+	// it depends on config order and could silently move one collection's name
+	// onto another's indexed rows.
+	return names
+}
+
+// joinTail slugs the last n segments of a split path.
+func joinTail(parts []string, n int) string {
+	if n > len(parts) {
+		n = len(parts)
+	}
+	slug := strings.Join(parts[len(parts)-n:], "-")
+	slug = strings.Trim(nonAlphanumRe.ReplaceAllString(slug, "-"), "-")
 	if slug == "" {
-		slug = "collection"
+		return "collection"
 	}
 	return slug
 }
