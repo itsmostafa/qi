@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/itsmostafa/qi/compare/v0.9.0...v0.9.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* harden indexing and embedding integrity ([8d4f4a9](https://github.com/itsmostafa/qi/commit/8d4f4a9aa13038d7065fa3fe8435b9d46d74b06e))
+
 ## [0.9.0](https://github.com/itsmostafa/qi/compare/v0.8.0...v0.9.0) (2026-06-04)
 
 
