@@ -108,5 +108,9 @@ jobs:
           for asset in qi-darwin-amd64.tar.gz qi-darwin-arm64.tar.gz qi-linux-amd64.tar.gz qi-linux-arm64.tar.gz SHA256SUMS.txt; do
             echo "$ASSETS" | grep -q "^${asset}$" && echo "✓ $asset" || { echo "✗ Missing: $asset"; exit 1; }
           done
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ needs.release-please.outputs.tag_name }}" --draft=false --repo ${{ github.repository }}
       - name: Verify install.sh end to end
         run: QI_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
