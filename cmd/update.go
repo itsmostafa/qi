@@ -3,6 +3,7 @@ package cmd
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,12 +15,43 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/itsmostafa/qi/internal/version"
 	"github.com/spf13/cobra"
 )
 
 const githubRepo = "itsmostafa/qi"
+
+const (
+	// One deadline covers connect, headers and body: a stalled mirror must not
+	// hang `qi update` forever.
+	updateTimeout = 5 * time.Minute
+	// Release JSON and SHA256SUMS.txt are a few KB; the archive is one
+	// compressed binary. Both caps are generous by orders of magnitude.
+	maxMetadataBytes = 1 << 20
+	maxArchiveBytes  = 100 << 20
+)
+
+var updateClient = &http.Client{Timeout: updateTimeout}
+
+// httpGet fetches url with the command's context and a bounded client, and
+// rejects non-200 responses so no caller parses an error page as data.
+func httpGet(ctx context.Context, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := updateClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("%s returned %s", url, resp.Status)
+	}
+	return resp, nil
+}
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
@@ -32,7 +64,8 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("finding current executable: %w", err)
 	}
-	release, err := fetchLatestRelease()
+	ctx := cmd.Context()
+	release, err := fetchLatestRelease(ctx)
 	if err != nil {
 		return fmt.Errorf("fetching latest release: %w", err)
 	}
@@ -55,12 +88,12 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("finding SHA256SUMS.txt: %w", err)
 	}
 
-	expectedHash, err := fetchExpectedChecksum(sumsURL, archiveName)
+	expectedHash, err := fetchExpectedChecksum(ctx, sumsURL, archiveName)
 	if err != nil {
 		return fmt.Errorf("fetching checksums: %w", err)
 	}
 
-	tmp, err := downloadToTemp(archiveURL)
+	tmp, err := downloadToTemp(ctx, archiveURL)
 	if err != nil {
 		return fmt.Errorf("downloading archive: %w", err)
 	}
@@ -97,18 +130,15 @@ type githubAsset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-func fetchLatestRelease() (*githubRelease, error) {
+func fetchLatestRelease(ctx context.Context) (*githubRelease, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo)
-	resp, err := http.Get(url) //nolint:noctx
+	resp, err := httpGet(ctx, url)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub API returned %s", resp.Status)
-	}
 	var rel githubRelease
-	return &rel, json.NewDecoder(resp.Body).Decode(&rel)
+	return &rel, json.NewDecoder(io.LimitReader(resp.Body, maxMetadataBytes)).Decode(&rel)
 }
 
 func findAssetURL(assets []githubAsset, name string) (string, error) {
@@ -120,13 +150,13 @@ func findAssetURL(assets []githubAsset, name string) (string, error) {
 	return "", fmt.Errorf("asset %q not found in release", name)
 }
 
-func fetchExpectedChecksum(sumsURL, assetName string) (string, error) {
-	resp, err := http.Get(sumsURL) //nolint:noctx
+func fetchExpectedChecksum(ctx context.Context, sumsURL, assetName string) (string, error) {
+	resp, err := httpGet(ctx, sumsURL)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMetadataBytes))
 	if err != nil {
 		return "", err
 	}
@@ -139,21 +169,22 @@ func fetchExpectedChecksum(sumsURL, assetName string) (string, error) {
 	return "", fmt.Errorf("no checksum found for %q", assetName)
 }
 
-func downloadToTemp(url string) (string, error) {
-	resp, err := http.Get(url) //nolint:noctx
+func downloadToTemp(ctx context.Context, url string) (string, error) {
+	resp, err := httpGet(ctx, url)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download returned %s", resp.Status)
-	}
 	f, err := os.CreateTemp("", "qi-update-*")
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	n, err := io.Copy(f, io.LimitReader(resp.Body, maxArchiveBytes+1))
+	if err == nil && n > maxArchiveBytes {
+		err = fmt.Errorf("archive exceeds %d bytes", int64(maxArchiveBytes))
+	}
+	if err != nil {
 		os.Remove(f.Name())
 		return "", err
 	}
@@ -200,11 +231,17 @@ func extractBinaryFromTar(archivePath, binaryName string) (string, error) {
 		if hdr.Name != binaryName {
 			continue
 		}
+		if hdr.Typeflag != tar.TypeReg {
+			return "", fmt.Errorf("archive member %q is not a regular file", hdr.Name)
+		}
+		if hdr.Size > maxArchiveBytes {
+			return "", fmt.Errorf("archive member %q declares %d bytes, over the %d byte limit", hdr.Name, hdr.Size, int64(maxArchiveBytes))
+		}
 		out, err := os.CreateTemp("", "qi-update-bin-*")
 		if err != nil {
 			return "", err
 		}
-		if _, err := io.Copy(out, tr); err != nil {
+		if _, err := io.Copy(out, io.LimitReader(tr, maxArchiveBytes)); err != nil {
 			out.Close()
 			os.Remove(out.Name())
 			return "", err
