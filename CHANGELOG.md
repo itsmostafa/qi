@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.13.0](https://github.com/itsmostafa/qi/compare/v0.12.0...v0.13.0) (2026-09-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **config:** the `providers.rerank`, `search.rerank_top_k` and `search.chunk_overlap` configuration keys are removed. They are ignored rather than rejected in existing configs, so no migration is required. An explicit `search.chunk_size: 0` or an unknown `search.default_mode` now fails at load instead of misbehaving at run time.
+
+### Features
+
+* **config:** validate search settings and drop the dead rerank keys ([e88272f](https://github.com/itsmostafa/qi/commit/e88272f683f6620965625790ddb988d4236e63a1))
+* **get:** add line ranges, byte caps and ambiguous-prefix errors ([bfa5154](https://github.com/itsmostafa/qi/commit/bfa5154d9a2589c196e0098e7a0cc85ccf46573b))
+
+
+### Bug Fixes
+
+* **chunker:** reject a non-positive chunk size instead of hanging ([60880a5](https://github.com/itsmostafa/qi/commit/60880a582574a0bc64daaf8cbb8231033a4c948a))
+* **get:** return shared content when documents have one hash ([5bfaada](https://github.com/itsmostafa/qi/commit/5bfaadacc4f4b45ad12b7710ac902df35766827f))
+* **indexer:** cap file size, purge deactivated bodies, report stale reads ([af1a8eb](https://github.com/itsmostafa/qi/commit/af1a8eb9fe4153a24d529cce08c24e5bc010089e))
+* **parser:** index documents that are nothing but headings ([43d4bc6](https://github.com/itsmostafa/qi/commit/43d4bc6951be1a27461c4adff99777c8864735b1))
+* **parser:** index every heading in a heading-only document ([91af04a](https://github.com/itsmostafa/qi/commit/91af04abfffd4a1f48dc820a923e0c0dfd5f994d))
+* **providers:** check HTTP status before decoding embedding responses ([b05e686](https://github.com/itsmostafa/qi/commit/b05e68660c7dd3a729e337f7fe096548c246f0bc))
+* resolve the open findings from the 2026-09-03 deep audit ([b7b8e6b](https://github.com/itsmostafa/qi/commit/b7b8e6b6d0ae566e710e4f8fb4e81abf2bbd7173))
+* **search:** return one result per document instead of one per chunk ([ebaa2f7](https://github.com/itsmostafa/qi/commit/ebaa2f7f3312bdef599d847d4555ab0803d2695d))
+* **security:** restrict local file permissions and honor init --config ([a448a1d](https://github.com/itsmostafa/qi/commit/a448a1da60f4909562bebb8879ee10965b45d499))
+* **update:** bound self-update network and extraction operations ([60291a0](https://github.com/itsmostafa/qi/commit/60291a0e2ace1040557fea4c59da21c254589ad7))
+
 ## [0.12.0](https://github.com/itsmostafa/qi/compare/v0.11.0...v0.12.0) (2026-09-04)
 
 
