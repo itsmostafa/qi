@@ -192,8 +192,12 @@ func (db *DB) RenameCollections(ctx context.Context, renames [][2]string) error 
 	}
 	defer tx.Rollback()
 
-	// A generated collection name never contains "/", so a staged name cannot
-	// collide with a real one.
+	// Generated collection names are alphanumeric and "-", so a staged name
+	// cannot collide with one.
+	targets := make(map[string]bool, len(pending))
+	for _, r := range pending {
+		targets[r[1]] = true
+	}
 	staged := make([]string, len(pending))
 	for i, r := range pending {
 		staged[i] = fmt.Sprintf("/staging/%d", i)
@@ -209,9 +213,17 @@ func (db *DB) RenameCollections(ctx context.Context, renames [][2]string) error 
 		if stranded == 0 {
 			continue
 		}
-		// Documents that could not move without overwriting a different file
-		// go back under their original name, where they stay searchable and
-		// can be removed deliberately. That name is free: staging emptied it.
+		// Documents that could not move without overwriting a different file go
+		// back under their original name, where they stay searchable and can be
+		// removed deliberately. Staging emptied that name — unless another
+		// rename in this set has since landed on it, in which case there is no
+		// name left that means what these documents mean. Fail the whole set
+		// rather than merge them into a collection they do not belong to.
+		if targets[r[0]] {
+			return fmt.Errorf("cannot rename collection %q to %q: %d documents collide with %q, "+
+				"and %q is now another collection's name; rename one of them by hand",
+				r[0], r[1], stranded, r[1], r[0])
+		}
 		slog.Warn("collection rename left documents behind: the new name is already used by different files",
 			"old", r[0], "new", r[1], "documents", stranded)
 		if _, err := renameCollectionTx(ctx, tx, staged[i], r[0]); err != nil {

@@ -147,3 +147,31 @@ func TestRenameCollectionsHandlesChainedNames(t *testing.T) {
 	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'foo'`, 1)
 	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'y-x-foo'`, 0)
 }
+
+// A chained rename whose second hop strands documents has nowhere safe to put
+// them: the first hop has already taken the name they came from.
+func TestRenameCollectionsRefusesUnresolvableChain(t *testing.T) {
+	ctx := context.Background()
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "qi.db"))
+	if err != nil {
+		t.Fatalf("opening db: %v", err)
+	}
+	defer database.Close()
+
+	insertRenameTestDocument(t, database, "y-x-foo", "a.md", "from y")
+	insertRenameTestDocument(t, database, "x-foo", "b.md", "from x")
+	insertRenameTestDocument(t, database, "foo", "b.md", "a different b")
+
+	if err := database.RenameCollections(ctx, [][2]string{
+		{"y-x-foo", "x-foo"},
+		{"x-foo", "foo"},
+	}); err == nil {
+		t.Fatal("RenameCollections succeeded, want an error")
+	}
+
+	// Nothing moved: the whole set rolls back rather than mixing collections.
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'y-x-foo'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'x-foo'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'foo'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection LIKE '/staging/%'`, 0)
+}

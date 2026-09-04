@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/itsmostafa/qi/internal/config"
 	"github.com/itsmostafa/qi/internal/db"
@@ -33,9 +34,11 @@ func New(ctx context.Context, cfgPath string) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)
 	}
+	// Best-effort: the rename is a migration, not a precondition. A set that
+	// cannot be applied rolls back whole, and warning here keeps every other
+	// command — including the `qi delete` that resolves the conflict — usable.
 	if err := database.RenameCollections(ctx, legacyRenames(cfg.Collections)); err != nil {
-		_ = database.Close()
-		return nil, fmt.Errorf("normalizing collection names: %w", err)
+		slog.Warn("collection names left unnormalized", "error", err)
 	}
 
 	// The embedding fingerprint identifies which provider endpoint and
