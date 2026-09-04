@@ -21,13 +21,13 @@ var initCmd = &cobra.Command{
 		}
 
 		// Create config directory
-		if err := os.MkdirAll(filepath.Dir(cfgPath), 0o750); err != nil {
+		if err := os.MkdirAll(filepath.Dir(cfgPath), 0o700); err != nil {
 			return fmt.Errorf("creating config dir: %w", err)
 		}
 
 		// Write default config only if it doesn't exist
 		if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-			if err := os.WriteFile(cfgPath, []byte(config.DefaultConfigTemplate), 0o640); err != nil {
+			if err := os.WriteFile(cfgPath, []byte(config.DefaultConfigTemplate), 0o600); err != nil {
 				return fmt.Errorf("writing config: %w", err)
 			}
 			fmt.Printf("Config written to %s\n", cfgPath)
@@ -35,8 +35,13 @@ var initCmd = &cobra.Command{
 			fmt.Printf("Config already exists at %s\n", cfgPath)
 		}
 
-		// Open (and migrate) the database
-		dbPath := config.DefaultDBPath()
+		// Open (and migrate) the database the selected config points at, not
+		// the global default: `qi --config x.yaml init` must initialize x's.
+		cfg, err := config.Load(cfgPath)
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+		dbPath := cfg.DatabasePath
 		ctx := context.Background()
 		database, err := db.Open(ctx, dbPath)
 		if err != nil {

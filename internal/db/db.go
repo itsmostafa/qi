@@ -26,8 +26,14 @@ type DB struct {
 // Open opens (or creates) the qi SQLite database at path, runs migrations,
 // and configures WAL mode.
 func Open(ctx context.Context, path string) (*DB, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("creating db dir: %w", err)
+	}
+
+	// The indexed corpus is private: tighten the database file before the first
+	// write, rather than leaving it at whatever the umask allows.
+	if err := securePerms(path); err != nil {
+		return nil, fmt.Errorf("securing db file: %w", err)
 	}
 
 	// busy_timeout is set in the connection init hook, which the driver runs
@@ -60,7 +66,36 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
+	// -wal and -shm are created by SQLite with their own umask-derived mode, not
+	// the main file's, and only exist once WAL mode is live — so they are
+	// tightened here, before any document text reaches them.
+	// ponytail: if the pool ever drops and reopens the connection mid-process,
+	// SQLite recreates them at umask mode; `qi doctor` warns, and the upgrade
+	// path is SQLite's "modeof" URI parameter if the audit's objection to
+	// file: DSNs is ever resolved.
+	if err := securePerms(path); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("securing db file: %w", err)
+	}
+
 	return db, nil
+}
+
+// securePerms restricts the database and any existing WAL sidecars to the owner.
+func securePerms(path string) error {
+	// Not best effort: chmod alone would happily strip the x bit off a directory
+	// if database_path pointed at one.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_ = f.Close()
+	for _, sidecar := range []string{path + "-wal", path + "-shm"} {
+		// Best effort: absent until WAL mode creates them, and another process
+		// may delete one at any moment.
+		_ = os.Chmod(sidecar, 0o600)
+	}
+	return os.Chmod(path, 0o600)
 }
 
 // busyTimeout bounds how long SQLite waits for a competing process before
