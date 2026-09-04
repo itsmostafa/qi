@@ -9,6 +9,7 @@ type Section struct {
 
 // Document is the parsed output of a file.
 type Document struct {
+	Meta     Meta
 	Title    string
 	Sections []Section
 }

@@ -4,10 +4,51 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/itsmostafa/qi/internal/search"
 )
+
+// FTS5 wraps matched terms in sentinel bytes. Render them as ANSI bold on a
+// terminal and drop them everywhere else — they are markers, not content, and
+// as <b> tags they used to leak into JSON and into piped output.
+const (
+	ansiBold  = "\x1b[1m"
+	ansiReset = "\x1b[0m"
+)
+
+var highlightStripper = strings.NewReplacer(
+	search.HighlightOpen, "",
+	search.HighlightClose, "",
+)
+
+var highlightANSI = strings.NewReplacer(
+	search.HighlightOpen, ansiBold,
+	search.HighlightClose, ansiReset,
+)
+
+// isTerminal reports whether w is a character device, so escape codes are only
+// emitted where something will interpret them.
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+// stripHighlights returns a copy of results with highlight markers removed, for
+// formats that carry no styling.
+func stripHighlights(results []search.Result) []search.Result {
+	out := make([]search.Result, len(results))
+	for i, r := range results {
+		r.Snippet = highlightStripper.Replace(r.Snippet)
+		out[i] = r
+	}
+	return out
+}
 
 // Formatter writes search results to a writer.
 type Formatter interface {
@@ -34,15 +75,27 @@ func (f *TextFormatter) WriteResults(w io.Writer, results []search.Result) error
 		fmt.Fprintln(w, "No results found.")
 		return nil
 	}
+	highlight := highlightStripper
+	if isTerminal(w) {
+		highlight = highlightANSI
+	}
 	for i, r := range results {
 		location := fmt.Sprintf("qi://%s/%s", r.Collection, r.Path)
 		if r.HeadingPath != "" {
 			location += " [" + r.HeadingPath + "]"
 		}
-		fmt.Fprintf(w, "%d. %s (score: %.4f)\n", i+1, r.Title, r.Score)
+		scale := r.Scale
+		if scale == "" {
+			scale = "score"
+		}
+		fmt.Fprintf(w, "%d. %s (%s: %.4f)", i+1, r.Title, scale, r.Score)
+		if r.Timestamp != "" {
+			fmt.Fprintf(w, " [%s]", r.Timestamp)
+		}
+		fmt.Fprintln(w)
 		fmt.Fprintf(w, "   %s\n", location)
 		if r.Snippet != "" {
-			fmt.Fprintf(w, "   %s\n", r.Snippet)
+			fmt.Fprintf(w, "   %s\n", highlight.Replace(r.Snippet))
 		}
 		if r.Explain != nil {
 			ex := r.Explain
@@ -66,7 +119,12 @@ type JSONFormatter struct{}
 func (f *JSONFormatter) WriteResults(w io.Writer, results []search.Result) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(results)
+	// Always an array: a nil slice would encode as null and break callers that
+	// iterate the response unconditionally.
+	if results == nil {
+		results = []search.Result{}
+	}
+	return enc.Encode(stripHighlights(results))
 }
 
 // MarkdownFormatter writes results as a Markdown list.
@@ -86,7 +144,7 @@ func (f *MarkdownFormatter) WriteResults(w io.Writer, results []search.Result) e
 		}
 		fmt.Fprintln(w)
 		if r.Snippet != "" {
-			fmt.Fprintf(w, "> %s\n", r.Snippet)
+			fmt.Fprintf(w, "> %s\n", highlightStripper.Replace(r.Snippet))
 		}
 		fmt.Fprintln(w)
 	}

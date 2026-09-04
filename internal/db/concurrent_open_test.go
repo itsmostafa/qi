@@ -30,8 +30,8 @@ func TestConcurrentFreshDatabaseOpens(t *testing.T) {
 						return
 					}
 					if _, err := database.ExecContext(ctx,
-						`INSERT INTO collections(name, path) VALUES (?, ?)`,
-						fmt.Sprintf("collection-%d", i), fmt.Sprintf("/tmp/%d", i)); err != nil {
+						`INSERT INTO index_runs(collection) VALUES (?)`,
+						fmt.Sprintf("collection-%d", i)); err != nil {
 						errs <- fmt.Errorf("write %d: %w", i, err)
 					}
 					if err := database.Close(); err != nil {
@@ -55,7 +55,7 @@ func TestConcurrentFreshDatabaseOpens(t *testing.T) {
 			}
 			defer database.Close()
 			assertDBCount(t, database, `PRAGMA busy_timeout`, int(busyTimeout.Milliseconds()))
-			assertDBCount(t, database, `SELECT COUNT(*) FROM collections`, 8)
+			assertDBCount(t, database, `SELECT COUNT(*) FROM index_runs`, 8)
 			assertDBCount(t, database, `SELECT COUNT(*) FROM schema_version WHERE version BETWEEN 1 AND 4`, 4)
 			assertDBCount(t, database, `SELECT COUNT(*) FROM schema_version WHERE version = 0`, 0)
 			assertDBCount(t, database, `SELECT COUNT(*) FROM pragma_table_info('embeddings') WHERE name = 'fingerprint'`, 1)

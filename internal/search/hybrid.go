@@ -30,9 +30,9 @@ func NewHybrid(bm25 *BM25, vector *VectorSearch, embedding providers.EmbeddingPr
 func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) {
 	// BM25 is always run
 	bm25Opts := opts
-	bm25Opts.TopK = h.cfg.BM25TopK
-	if bm25Opts.TopK <= 0 {
-		bm25Opts.TopK = 50
+	bm25Opts.Pool = h.cfg.BM25TopK
+	if bm25Opts.Pool <= 0 {
+		bm25Opts.Pool = 50
 	}
 
 	bm25Results, err := h.bm25.Search(ctx, bm25Opts)
@@ -50,9 +50,6 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 		if topScore > 0 && secondScore > 0 && topScore/secondScore > 3.0 {
 			slog.Debug("strong BM25 signal, skipping vector search",
 				"top", topScore, "second", secondScore)
-			if opts.TopK > 0 && len(bm25Results) > opts.TopK {
-				bm25Results = bm25Results[:opts.TopK]
-			}
 			return applyExtensionBoost(bm25Results, preferExts, extBoost), nil
 		}
 	}
@@ -60,9 +57,6 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 	// No embedding provider — fall back to BM25 only
 	if h.embedding == nil {
 		slog.Debug("no embedding provider configured, using BM25 only")
-		if opts.TopK > 0 && len(bm25Results) > opts.TopK {
-			bm25Results = bm25Results[:opts.TopK]
-		}
 		return applyExtensionBoost(bm25Results, preferExts, extBoost), nil
 	}
 
@@ -74,9 +68,6 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 		} else {
 			slog.Warn("embedding query failed, falling back to BM25", "error", err)
 		}
-		if opts.TopK > 0 && len(bm25Results) > opts.TopK {
-			bm25Results = bm25Results[:opts.TopK]
-		}
 		return applyExtensionBoost(bm25Results, preferExts, extBoost), nil
 	}
 	queryVec := embeddings[0]
@@ -85,13 +76,15 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 	if vecTopK <= 0 {
 		vecTopK = 50
 	}
+	// Finalize can only return what it is given: a pool smaller than the
+	// caller's limit caps the result count when BM25 contributes little.
+	if opts.TopK > vecTopK {
+		vecTopK = opts.TopK
+	}
 
-	vecResults, err := h.vector.Search(ctx, queryVec, vecTopK, opts.Collection)
+	vecResults, err := h.vector.Search(ctx, queryVec, vecTopK, opts)
 	if err != nil {
 		slog.Warn("vector search failed, falling back to BM25", "error", err)
-		if opts.TopK > 0 && len(bm25Results) > opts.TopK {
-			bm25Results = bm25Results[:opts.TopK]
-		}
 		return applyExtensionBoost(bm25Results, preferExts, extBoost), nil
 	}
 
@@ -108,13 +101,7 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 		}
 	}
 
-	topK := opts.TopK
-	if topK <= 0 {
-		topK = 10
-	}
-	if len(fused) > topK {
-		fused = fused[:topK]
-	}
-
+	// Truncation happens in Finalize, after dedupe and the per-document cap:
+	// cutting to TopK here would spend slots on duplicates.
 	return applyExtensionBoost(fused, preferExts, extBoost), nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/itsmostafa/qi/internal/app"
 	"github.com/itsmostafa/qi/internal/db"
@@ -80,6 +81,12 @@ var statsCmd = &cobra.Command{
 		_ = runRow.Scan(&lastRun)
 		if lastRun == "" {
 			lastRun = "never"
+		} else {
+			// SQLite's datetime('now') is UTC. Printed raw it reads as a local
+			// time that is hours off — sometimes a date that has not happened.
+			if t, err := time.ParseInLocation("2006-01-02 15:04:05", lastRun, time.UTC); err == nil {
+				lastRun = t.Local().Format("2006-01-02 15:04:05 MST")
+			}
 		}
 
 		// Print

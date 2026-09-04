@@ -25,8 +25,11 @@ Always run `task check` before finishing any code change to ensure all checks pa
 - **Content-addressable storage**: `content` table keyed by SHA-256 hash; `documents` references by hash. Enables deduplication and O(1) change detection.
 - **Break-point chunker**: Scores chunk boundaries by type (heading=100, code fence=80, blank line=20) with distance decay from target size.
 - **Graceful degradation**: Vector search is optional — BM25 always works.
-- **Auto-generated collection names**: Collection names are derived from full path segments (e.g. `~/Projects/tools/qi` → `tools-qi`). The `--name` flag was removed from `index`; use the derived slug or configure an alias. Legacy names are normalized on startup.
+- **Auto-generated collection names**: A collection is named after its own directory (`~/Projects/tools/qi` → `qi`). Colliding names absorb leading path segments until unique (`work-notes`, `personal-notes`). The `--name` flag was removed from `index`. Legacy names are normalized on startup and indexed rows migrate via `RenameCollectionData`.
 - **Query relaxation**: BM25 search automatically falls back from conjunctive to disjunctive matching for natural-language queries that return zero results.
+- **Frontmatter is document metadata, not body text**: `internal/parser/frontmatter.go` strips YAML frontmatter before goldmark parses. `title`, `timestamp`/`date` and `tags` become document-level fields; the useful ones are re-emitted as one leading section of plain prose so they stay searchable.
+- **Post-retrieval pass**: `search.Finalize` (`internal/search/postprocess.go`) applies date sort, duplicate-snippet collapse and a 2-chunk-per-document cap over the whole candidate pool, then truncates to the caller's limit. Retrievers no longer truncate; commands call `Finalize`.
+- **Compaction on index**: every `qi index` prunes orphaned content blobs, runs FTS5 `optimize`, and `VACUUM`s when the freelist exceeds a quarter of the file.
 - **Auto-embed on index**: When an embedder is configured, chunks are embedded immediately after indexing without a separate step.
 - **Config**: Raw `gopkg.in/yaml.v3`, no viper. `~` expansion + relative path resolution.
 
@@ -38,7 +41,7 @@ internal/
   app/                Wires config + db + services
   config/             Config loading, defaults, path expansion
   db/                 SQLite open/migrate/WAL, embedding blob storage
-    migrations/       Embedded SQL migrations (001_init.sql … 005_drop_llm_cache.sql)
+    migrations/       Embedded SQL migrations (001_init.sql … 006_document_metadata.sql)
   chunker/            Break-point chunker (chunker.Chunker interface)
   indexer/            Filesystem walker, SHA-256 change detection, embedder
   output/             Text/JSON formatters
@@ -60,7 +63,7 @@ Tests use real in-memory SQLite (no mocking). Provider tests use `httptest.NewSe
 
 ## Adding a New Migration
 
-Add `internal/db/migrations/00N_description.sql` — the runner applies them in alphabetical order and skips versions already recorded in `schema_version`. Current migrations: `001_init.sql` … `005_drop_llm_cache.sql`.
+Add `internal/db/migrations/00N_description.sql` — the runner applies them in alphabetical order and skips versions already recorded in `schema_version`. Current migrations: `001_init.sql` … `006_document_metadata.sql`. An `ALTER TABLE ... ADD COLUMN` migration must also register one added column in `addedColumns` (`migrate.go`), since SQLite has no `IF NOT EXISTS` for it.
 
 ## sqlite-vec Note
 

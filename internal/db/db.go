@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,8 +104,8 @@ func (db *DB) Ping(ctx context.Context) error {
 
 // DeleteCollection removes all data associated with the given collection name:
 // chunk vectors, embeddings, chunks (FTS triggers keep chunks_fts in sync),
-// documents, index runs, and the collections table row. Orphaned content blobs
-// (not referenced by any remaining document) are also pruned.
+// documents, and index runs. Orphaned content blobs (not referenced by any
+// remaining document) are also pruned.
 func (db *DB) DeleteCollection(ctx context.Context, name string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -145,12 +146,6 @@ func (db *DB) DeleteCollection(ctx context.Context, name string) error {
 		return fmt.Errorf("deleting index_runs: %w", err)
 	}
 
-	// collections table row
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM collections WHERE name = ?`, name); err != nil {
-		return fmt.Errorf("deleting collection row: %w", err)
-	}
-
 	// orphaned content blobs (not referenced by any document)
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM content WHERE hash NOT IN (
@@ -163,8 +158,31 @@ func (db *DB) DeleteCollection(ctx context.Context, name string) error {
 }
 
 // RenameCollectionData merges indexed data from oldName into newName.
-func (db *DB) RenameCollectionData(ctx context.Context, oldName, newName, path string) error {
-	if oldName == "" || oldName == newName {
+//
+// A document is a duplicate only when the destination holds the same relative
+// path AND the same content hash — that is, genuinely the same file indexed
+// under both names. Matching on path alone would delete real documents whenever
+// the destination name happened to be occupied by a different directory that
+// shares a filename, which basename-derived collection names make easy to hit.
+// Documents that cannot move without overwriting a different file are left
+// under oldName, where they stay searchable and can be removed deliberately.
+func (db *DB) RenameCollectionData(ctx context.Context, oldName, newName string) error {
+	return db.RenameCollections(ctx, [][2]string{{oldName, newName}})
+}
+
+// RenameCollections applies a whole set of {old, new} renames in one
+// transaction. Renames are staged through temporary names first, because one
+// collection's old name can be another's new name ("x-foo" -> "foo" alongside
+// "y-x-foo" -> "x-foo"); renaming those in place would merge unrelated
+// documents into whichever name happened to still be occupied.
+func (db *DB) RenameCollections(ctx context.Context, renames [][2]string) error {
+	var pending [][2]string
+	for _, r := range renames {
+		if r[0] != "" && r[0] != r[1] {
+			pending = append(pending, r)
+		}
+	}
+	if len(pending) == 0 {
 		return nil
 	}
 
@@ -174,54 +192,43 @@ func (db *DB) RenameCollectionData(ctx context.Context, oldName, newName, path s
 	}
 	defer tx.Rollback()
 
-	for _, table := range []string{"chunk_vectors", "embeddings"} {
-		if _, err := tx.ExecContext(ctx, `
-			DELETE FROM `+table+` WHERE chunk_id IN (
-				SELECT c.id FROM chunks c
-				JOIN documents old ON old.id = c.doc_id
-				JOIN documents new ON new.collection = ? AND new.path = old.path
-				WHERE old.collection = ?
-			)`, newName, oldName); err != nil {
-			return fmt.Errorf("deleting duplicate %s: %w", table, err)
+	// Generated collection names are alphanumeric and "-", so a staged name
+	// cannot collide with one.
+	targets := make(map[string]bool, len(pending))
+	for _, r := range pending {
+		targets[r[1]] = true
+	}
+	staged := make([]string, len(pending))
+	for i, r := range pending {
+		staged[i] = fmt.Sprintf("/staging/%d", i)
+		if _, err := renameCollectionTx(ctx, tx, r[0], staged[i]); err != nil {
+			return err
 		}
 	}
-
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM chunks WHERE doc_id IN (
-			SELECT old.id FROM documents old
-			JOIN documents new ON new.collection = ? AND new.path = old.path
-			WHERE old.collection = ?
-		)`, newName, oldName); err != nil {
-		return fmt.Errorf("deleting duplicate chunks: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM documents
-		WHERE collection = ?
-		  AND path IN (SELECT path FROM documents WHERE collection = ?)
-	`, oldName, newName); err != nil {
-		return fmt.Errorf("deleting duplicate documents: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE documents SET collection = ? WHERE collection = ?`, newName, oldName); err != nil {
-		return fmt.Errorf("renaming documents: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE index_runs SET collection = ? WHERE collection = ?`, newName, oldName); err != nil {
-		return fmt.Errorf("renaming index_runs: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM collections WHERE name = ?`, oldName); err != nil {
-		return fmt.Errorf("deleting old collection row: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO collections(name, path, updated_at)
-		VALUES (?, ?, datetime('now'))
-		ON CONFLICT(name) DO UPDATE SET path = excluded.path, updated_at = datetime('now')
-	`, newName, path); err != nil {
-		return fmt.Errorf("upserting collection row: %w", err)
+	for i, r := range pending {
+		stranded, err := renameCollectionTx(ctx, tx, staged[i], r[1])
+		if err != nil {
+			return err
+		}
+		if stranded == 0 {
+			continue
+		}
+		// Documents that could not move without overwriting a different file go
+		// back under their original name, where they stay searchable and can be
+		// removed deliberately. Staging emptied that name — unless another
+		// rename in this set has since landed on it, in which case there is no
+		// name left that means what these documents mean. Fail the whole set
+		// rather than merge them into a collection they do not belong to.
+		if targets[r[0]] {
+			return fmt.Errorf("cannot rename collection %q to %q: %d documents collide with %q, "+
+				"and %q is now another collection's name; rename one of them by hand",
+				r[0], r[1], stranded, r[1], r[0])
+		}
+		slog.Warn("collection rename left documents behind: the new name is already used by different files",
+			"old", r[0], "new", r[1], "documents", stranded)
+		if _, err := renameCollectionTx(ctx, tx, staged[i], r[0]); err != nil {
+			return err
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -232,4 +239,71 @@ func (db *DB) RenameCollectionData(ctx context.Context, oldName, newName, path s
 	}
 
 	return tx.Commit()
+}
+
+// renameCollectionTx moves one collection's rows and reports how many
+// documents stayed behind because newName already holds a different file at
+// the same path.
+func renameCollectionTx(ctx context.Context, tx *sql.Tx, oldName, newName string) (int, error) {
+	for _, table := range []string{"chunk_vectors", "embeddings"} {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM `+table+` WHERE chunk_id IN (
+				SELECT c.id FROM chunks c
+				JOIN documents old ON old.id = c.doc_id
+				JOIN documents new ON new.collection = ? AND new.path = old.path
+				                  AND new.content_hash = old.content_hash
+				WHERE old.collection = ?
+			)`, newName, oldName); err != nil {
+			return 0, fmt.Errorf("deleting duplicate %s: %w", table, err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM chunks WHERE doc_id IN (
+			SELECT old.id FROM documents old
+			JOIN documents new ON new.collection = ? AND new.path = old.path
+			                  AND new.content_hash = old.content_hash
+			WHERE old.collection = ?
+		)`, newName, oldName); err != nil {
+		return 0, fmt.Errorf("deleting duplicate chunks: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM documents AS old
+		WHERE old.collection = ?
+		  AND EXISTS (
+			SELECT 1 FROM documents new
+			WHERE new.collection = ? AND new.path = old.path
+			  AND new.content_hash = old.content_hash
+		  )
+	`, oldName, newName); err != nil {
+		return 0, fmt.Errorf("deleting duplicate documents: %w", err)
+	}
+
+	// Anything still sharing a path with the destination is a different file.
+	// Leaving it under oldName loses nothing and keeps UNIQUE(collection, path).
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE documents AS old SET collection = ?
+		WHERE old.collection = ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM documents new
+			WHERE new.collection = ? AND new.path = old.path
+		  )`, newName, oldName, newName); err != nil {
+		return 0, fmt.Errorf("renaming documents: %w", err)
+	}
+
+	var stranded int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM documents WHERE collection = ?`, oldName).Scan(&stranded); err != nil {
+		return 0, fmt.Errorf("counting unmoved documents: %w", err)
+	}
+	// Run history follows the documents, so it only moves when they all did.
+	if stranded == 0 {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE index_runs SET collection = ? WHERE collection = ?`, newName, oldName); err != nil {
+			return 0, fmt.Errorf("renaming index_runs: %w", err)
+		}
+	}
+
+	return stranded, nil
 }

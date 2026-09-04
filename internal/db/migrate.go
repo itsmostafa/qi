@@ -73,12 +73,13 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("reading migration %s: %w", name, err)
 		}
 
-		// Early builds of migration 004 could commit the ALTER TABLE before
-		// recording schema_version. Treat that exact state as already applied;
-		// all new applications execute the DDL and version marker atomically.
+		// SQLite has no ALTER TABLE ADD COLUMN IF NOT EXISTS, so a migration
+		// whose DDL committed without its schema_version marker (early builds
+		// of 004 did this) would fail forever on re-run. Treat the column
+		// already being present as "applied" and just record the marker.
 		alreadyApplied := false
-		if ver == 4 {
-			alreadyApplied, err = columnExists(ctx, tx, "embeddings", "fingerprint")
+		if c, ok := addedColumns[ver]; ok {
+			alreadyApplied, err = columnExists(ctx, tx, c.table, c.column)
 		}
 		if err == nil && !alreadyApplied {
 			_, err = tx.ExecContext(ctx, string(data))
@@ -122,6 +123,15 @@ func appliedVersions(ctx context.Context, tx *sql.Tx) (map[int]bool, error) {
 		return nil, fmt.Errorf("reading schema version: %w", err)
 	}
 	return applied, nil
+}
+
+// addedColumns names the LAST column each ALTER TABLE migration adds, used to
+// detect a DDL-committed-but-unversioned state. It must be the last one: an
+// earlier column proves only that the migration started, and treating a torn
+// half as applied would leave the rest of its DDL permanently unrun.
+var addedColumns = map[int]struct{ table, column string }{
+	4: {"embeddings", "fingerprint"},
+	6: {"documents", "tags"},
 }
 
 func columnExists(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {

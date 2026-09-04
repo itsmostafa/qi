@@ -438,17 +438,17 @@ func TestSlugFromPath(t *testing.T) {
 		{
 			name: "mac user project path",
 			path: "/Users/alice/Projects/tools/qi",
-			want: "Projects-tools-qi",
+			want: "qi",
 		},
 		{
 			name: "linux user project path",
 			path: "/home/alice/Projects/tools/qi",
-			want: "Projects-tools-qi",
+			want: "qi",
 		},
 		{
 			name: "spaces and punctuation",
 			path: "/tmp/My Notes/docs.v1",
-			want: "tmp-My-Notes-docs-v1",
+			want: "docs-v1",
 		},
 		{
 			name: "root fallback",
@@ -462,5 +462,83 @@ func TestSlugFromPath(t *testing.T) {
 				t.Fatalf("SlugFromPath(%q) = %q, want %q", tt.path, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAssignCollectionNames(t *testing.T) {
+	tests := []struct {
+		name  string
+		paths []string
+		want  []string
+	}{
+		{
+			name:  "distinct basenames stay short",
+			paths: []string{"/Users/alice/Projects/tools/qi", "/Users/alice/Documents/health"},
+			want:  []string{"qi", "health"},
+		},
+		{
+			name:  "collision lengthens only the collided",
+			paths: []string{"/Users/alice/work/notes", "/Users/alice/personal/notes", "/Users/alice/qi"},
+			want:  []string{"work-notes", "personal-notes", "qi"},
+		},
+		{
+			name:  "lengthens until distinct",
+			paths: []string{"/Users/alice/a/x/notes", "/Users/alice/b/x/notes"},
+			want:  []string{"a-x-notes", "b-x-notes"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AssignCollectionNames(tt.paths)
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("names[%d] = %q, want %q (all: %v)", i, got[i], tt.want[i], got)
+				}
+			}
+		})
+	}
+}
+
+// A fixed depth cap used to stop lengthening before deep paths diverged,
+// collapsing two distinct collections onto one name.
+func TestAssignCollectionNamesDisambiguatesDeepPaths(t *testing.T) {
+	got := AssignCollectionNames([]string{
+		"/Users/alice/a/b/c/d/e/f/g/h/notes",
+		"/Users/alice/z/b/c/d/e/f/g/h/notes",
+	})
+	if got[0] == got[1] {
+		t.Fatalf("distinct paths collapsed to %q", got[0])
+	}
+}
+
+// Termination must not depend on a round cap: the same path twice shares every
+// segment and can never be disambiguated.
+func TestAssignCollectionNamesTerminatesOnIdenticalPaths(t *testing.T) {
+	got := AssignCollectionNames([]string{"/Users/alice/notes", "/Users/alice/notes"})
+	if got[0] != got[1] {
+		t.Errorf("identical paths got different names: %v", got)
+	}
+}
+
+// A collision-lengthened name must still resolve on removal: the config stores
+// the short legacy name, but every command refers to the assigned one.
+func TestRemoveCollectionResolvesCollisionLengthenedName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("collections:\n  - name: notes\n    path: /work/notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddCollection(path, Collection{Path: "/personal/notes"}); err != nil {
+		t.Fatalf("AddCollection: %v", err)
+	}
+	if err := RemoveCollection(path, "work-notes"); err != nil {
+		t.Fatalf("RemoveCollection(work-notes): %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Collections) != 1 || cfg.Collections[0].Path != "/personal/notes" {
+		t.Fatalf("collections = %+v, want only /personal/notes", cfg.Collections)
 	}
 }

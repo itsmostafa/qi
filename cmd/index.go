@@ -13,6 +13,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var indexForce bool
+
 var indexCmd = &cobra.Command{
 	Use:   "index [path|collection]",
 	Short: "Index documents into the knowledge base",
@@ -23,8 +25,12 @@ With no arguments, indexes the current directory (named from path).
 With a path argument (absolute, relative, or starting with ~), indexes that directory (named from path).
 With a collection name, indexes the collection from config.
 
+Unchanged files are skipped by content hash. After upgrading qi, use --force to
+rebuild chunks and embeddings with the current parser.
+
 A collection name is derived automatically from the directory path:
-  /Users/alice/Projects/tools/qi -> Projects-tools-qi`,
+  /Users/alice/Projects/tools/qi -> qi
+Colliding names take on leading path segments until unique.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		a, err := app.New(ctx, cfgFile)
@@ -87,7 +93,15 @@ func autoCollection(a *app.App, absPath string) (config.Collection, error) {
 		}
 		return *existing, nil
 	}
-	slug := config.SlugFromPath(absPath)
+	// Name the new collection alongside the existing ones, or a colliding
+	// basename would be written to config and then disambiguated differently
+	// in memory on every load.
+	paths := make([]string, 0, len(a.Config.Collections)+1)
+	for _, c := range a.Config.Collections {
+		paths = append(paths, c.Path)
+	}
+	paths = append(paths, absPath)
+	slug := config.AssignCollectionNames(paths)[len(paths)-1]
 	col := config.Collection{Name: slug, Path: absPath}
 	if err := saveCollection(col); err != nil {
 		return config.Collection{}, err
@@ -142,6 +156,7 @@ func isPathArg(s string) bool {
 }
 
 func runIndex(ctx context.Context, a *app.App, collections []config.Collection) error {
+	a.Indexer.Force = indexForce
 	var collectionErrs []error
 	for _, col := range collections {
 		fmt.Printf("Indexing %q (%s)...\n", col.Name, col.Path)
@@ -164,4 +179,9 @@ func runIndex(ctx context.Context, a *app.App, collections []config.Collection) 
 		}
 	}
 	return errors.Join(collectionErrs...)
+}
+
+func init() {
+	indexCmd.Flags().BoolVar(&indexForce, "force", false,
+		"reindex files whose content is unchanged (needed after a qi upgrade changes parsing)")
 }

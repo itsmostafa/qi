@@ -16,14 +16,15 @@ func TestRenameCollectionDataMergesDuplicateDocuments(t *testing.T) {
 	}
 	defer database.Close()
 
-	insertRenameTestDocument(t, database, "old", "same.md", "old same")
+	// The same file indexed under both names: identical bytes, identical hash.
+	insertRenameTestDocument(t, database, "old", "same.md", "shared body")
 	insertRenameTestDocument(t, database, "old", "old.md", "old only")
-	insertRenameTestDocument(t, database, "new", "same.md", "new same")
+	insertRenameTestDocument(t, database, "new", "same.md", "shared body")
 	if _, err := database.ExecContext(ctx, `INSERT INTO index_runs(collection) VALUES ('old')`); err != nil {
 		t.Fatalf("inserting index run: %v", err)
 	}
 
-	if err := database.RenameCollectionData(ctx, "old", "new", "/tmp/new"); err != nil {
+	if err := database.RenameCollectionData(ctx, "old", "new"); err != nil {
 		t.Fatalf("renaming collection data: %v", err)
 	}
 
@@ -41,7 +42,7 @@ func TestRenameCollectionDataMergesDuplicateDocuments(t *testing.T) {
 func insertRenameTestDocument(t *testing.T, database *DB, collection, path, body string) {
 	t.Helper()
 	ctx := context.Background()
-	sum := sha256.Sum256([]byte(collection + "\x00" + path + "\x00" + body))
+	sum := sha256.Sum256([]byte(body))
 	hash := hex.EncodeToString(sum[:])
 	if _, err := database.ExecContext(ctx,
 		`INSERT OR IGNORE INTO content(hash, body) VALUES (?, ?)`,
@@ -92,4 +93,85 @@ func assertDBCount(t *testing.T, database *DB, query string, want int) {
 	if got != want {
 		t.Fatalf("unexpected count for %q: got %d, want %d", query, got, want)
 	}
+}
+
+// Basename-derived collection names make it easy for a rename target to be
+// occupied by a different directory. Matching duplicates on path alone deleted
+// the user's real documents; only genuinely identical files may be dropped.
+func TestRenameCollectionDataKeepsDifferentFilesSharingAPath(t *testing.T) {
+	ctx := context.Background()
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "qi.db"))
+	if err != nil {
+		t.Fatalf("opening db: %v", err)
+	}
+	defer database.Close()
+
+	insertRenameTestDocument(t, database, "old", "shared.md", "the real document")
+	insertRenameTestDocument(t, database, "new", "shared.md", "an unrelated file")
+
+	if err := database.RenameCollectionData(ctx, "old", "new"); err != nil {
+		t.Fatalf("renaming collection data: %v", err)
+	}
+
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents`, 2)
+	assertDBCount(t, database,
+		`SELECT COUNT(*) FROM content WHERE CAST(body AS TEXT) = 'the real document'`, 1)
+	// It could not move without overwriting a different file, so it stays put
+	// rather than being deleted.
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'old'`, 1)
+}
+
+// One collection's old name is another's new name. Renaming in place would
+// merge the chain's documents into whichever name was still occupied.
+func TestRenameCollectionsHandlesChainedNames(t *testing.T) {
+	ctx := context.Background()
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "qi.db"))
+	if err != nil {
+		t.Fatalf("opening db: %v", err)
+	}
+	defer database.Close()
+
+	insertRenameTestDocument(t, database, "y-x-foo", "a.md", "from y")
+	insertRenameTestDocument(t, database, "x-foo", "b.md", "from x")
+
+	if err := database.RenameCollections(ctx, [][2]string{
+		{"y-x-foo", "x-foo"},
+		{"x-foo", "foo"},
+	}); err != nil {
+		t.Fatalf("renaming collections: %v", err)
+	}
+
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'x-foo' AND path = 'a.md'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'x-foo'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'foo' AND path = 'b.md'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'foo'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'y-x-foo'`, 0)
+}
+
+// A chained rename whose second hop strands documents has nowhere safe to put
+// them: the first hop has already taken the name they came from.
+func TestRenameCollectionsRefusesUnresolvableChain(t *testing.T) {
+	ctx := context.Background()
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "qi.db"))
+	if err != nil {
+		t.Fatalf("opening db: %v", err)
+	}
+	defer database.Close()
+
+	insertRenameTestDocument(t, database, "y-x-foo", "a.md", "from y")
+	insertRenameTestDocument(t, database, "x-foo", "b.md", "from x")
+	insertRenameTestDocument(t, database, "foo", "b.md", "a different b")
+
+	if err := database.RenameCollections(ctx, [][2]string{
+		{"y-x-foo", "x-foo"},
+		{"x-foo", "foo"},
+	}); err == nil {
+		t.Fatal("RenameCollections succeeded, want an error")
+	}
+
+	// Nothing moved: the whole set rolls back rather than mixing collections.
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'y-x-foo'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'x-foo'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'foo'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection LIKE '/staging/%'`, 0)
 }
