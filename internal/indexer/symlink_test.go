@@ -57,7 +57,7 @@ func TestIndexer_RejectsEscapingFileSymlink(t *testing.T) {
 	}
 }
 
-func TestIndexer_DeactivatesPreviouslyLeakedSymlinkOnReindex(t *testing.T) {
+func TestIndexer_PurgesPreviouslyLeakedSymlinkOnReindex(t *testing.T) {
 	database := openTestDB(t)
 	idx := New(database, 256)
 	collDir := t.TempDir()
@@ -76,7 +76,8 @@ func TestIndexer_DeactivatesPreviouslyLeakedSymlinkOnReindex(t *testing.T) {
 	}
 
 	// Reindex an empty collection — the stale row must be deactivated since
-	// nothing in the current walk (correctly) produces that path.
+	// nothing in the current walk (correctly) produces that path, and compact
+	// then drops the row and the leaked body with it.
 	stats, err := idx.Index(context.Background(), col)
 	if err != nil {
 		t.Fatalf("Index failed: %v", err)
@@ -85,13 +86,22 @@ func TestIndexer_DeactivatesPreviouslyLeakedSymlinkOnReindex(t *testing.T) {
 		t.Errorf("expected 1 removed, got %d", stats.FilesRemoved)
 	}
 
-	var active int
+	var docs int
 	if err := database.QueryRowContext(context.Background(),
-		`SELECT active FROM documents WHERE collection='test' AND path='innocent.md'`).Scan(&active); err != nil {
+		`SELECT COUNT(*) FROM documents WHERE collection='test' AND path='innocent.md'`).Scan(&docs); err != nil {
 		t.Fatalf("querying document: %v", err)
 	}
-	if active != 0 {
-		t.Errorf("expected leaked document to be deactivated, got active=%d", active)
+	if docs != 0 {
+		t.Errorf("expected leaked document row to be gone, got %d", docs)
+	}
+
+	var leaked int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM content WHERE hash='deadbeef'`).Scan(&leaked); err != nil {
+		t.Fatalf("querying content: %v", err)
+	}
+	if leaked != 0 {
+		t.Errorf("leaked body survived the reindex (%d rows)", leaked)
 	}
 }
 

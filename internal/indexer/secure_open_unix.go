@@ -84,5 +84,17 @@ func (r *secureRoot) ReadFile(relPath string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("not a regular file")
 	}
-	return io.ReadAll(file)
+	if info.Size() > maxFileSize {
+		return nil, fmt.Errorf("file is %d bytes, over the %d-byte limit", info.Size(), maxFileSize)
+	}
+	// Bound the read too, not just the Stat: a writer appending after the check
+	// would otherwise grow the file past the cap while it is being read.
+	data, err := io.ReadAll(io.LimitReader(file, maxFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxFileSize {
+		return nil, fmt.Errorf("file grew past the %d-byte limit while being read", maxFileSize)
+	}
+	return data, nil
 }
