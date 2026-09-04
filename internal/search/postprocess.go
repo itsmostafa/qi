@@ -21,10 +21,6 @@ const (
 	HighlightClose = "\x03"
 )
 
-// maxPerDoc caps how many chunks of one document may occupy the result list.
-// ponytail: a fixed 2 rather than a config key — nothing has asked to tune it.
-const maxPerDoc = 2
-
 // dateFilterSQL builds the doc_timestamp predicates for Since/Until. alias is
 // the documents table alias in the caller's query.
 func dateFilterSQL(alias string, opts SearchOpts) (string, []any) {
@@ -41,28 +37,24 @@ func dateFilterSQL(alias string, opts SearchOpts) (string, []any) {
 	return sql, args
 }
 
-// capResults collapses duplicate chunks and stops any one document from
-// monopolising the list. Boilerplate repeated verbatim across files produces
-// byte-identical snippets, which is what the first pass removes.
+// capResults collapses duplicate snippets and keeps one result per document.
+// Boilerplate repeated verbatim across files produces byte-identical snippets,
+// which is what the first pass removes.
 //
-// ponytail: identity is the snippet string. The same chunk reached through BM25
-// (a 32-token window) and through vector search (the whole chunk) will not
-// match; collapsing those needs the chunk text in Result, which nothing else
-// wants yet.
+// Both retrievers and the fusion already emit one chunk per document, so the
+// per-document pass is a backstop rather than load-bearing: it keeps Finalize's
+// contract true if a future retriever forgets.
 func capResults(results []Result) []Result {
 	seen := make(map[string]bool, len(results))
-	perDoc := make(map[int64]int, len(results))
+	seenDoc := make(map[int64]bool, len(results))
 	out := results[:0:0]
 	for _, r := range results {
 		key := strings.TrimSpace(r.Snippet)
-		if key != "" && seen[key] {
-			continue
-		}
-		if perDoc[r.DocID] >= maxPerDoc {
+		if (key != "" && seen[key]) || seenDoc[r.DocID] {
 			continue
 		}
 		seen[key] = true
-		perDoc[r.DocID]++
+		seenDoc[r.DocID] = true
 		out = append(out, r)
 	}
 	return out

@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -146,3 +147,57 @@ func TestBM25_ExplainPopulated(t *testing.T) {
 
 // Prevent unused import
 var _ = runtime.Version
+
+// A verbose document whose chunks fill the pool must not starve every other
+// match: the pool is bounded by distinct documents, not by chunks.
+func TestBM25PoolIsBoundedByDocuments(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO content(hash, body) VALUES ('hv', 'verbose');
+		INSERT INTO documents(collection, path, title, content_hash)
+			VALUES ('test', 'verbose.md', 'Verbose', 'hv');
+	`); err != nil {
+		t.Fatalf("seeding verbose document: %v", err)
+	}
+	for i := range 30 {
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
+			 VALUES ('hv', 1, ?, 'widget widget widget', 'S', 0, 20)`, i); err != nil {
+			t.Fatalf("seeding chunk %d: %v", i, err)
+		}
+	}
+	for i := range 5 {
+		hash, path := fmt.Sprintf("h%d", i), fmt.Sprintf("other%d.md", i)
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO content(hash, body) VALUES (?, 'other')`, hash); err != nil {
+			t.Fatalf("seeding other content %d: %v", i, err)
+		}
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO documents(collection, path, title, content_hash) VALUES ('test', ?, 'Other', ?)`,
+			path, hash); err != nil {
+			t.Fatalf("seeding other document %d: %v", i, err)
+		}
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
+			 SELECT ?, id, 0, 'a widget lives here', 'S', 0, 19 FROM documents WHERE path = ?`,
+			hash, path); err != nil {
+			t.Fatalf("seeding chunk for other document %d: %v", i, err)
+		}
+	}
+
+	results, err := NewBM25(database).Search(ctx, SearchOpts{Query: "widget", Pool: 10, TopK: 10})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	docs := map[int64]bool{}
+	for _, r := range results {
+		if docs[r.DocID] {
+			t.Errorf("document %d returned twice", r.DocID)
+		}
+		docs[r.DocID] = true
+	}
+	if len(docs) != 6 {
+		t.Errorf("got %d distinct documents, want 6: the verbose file starved the pool", len(docs))
+	}
+}
