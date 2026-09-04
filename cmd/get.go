@@ -25,6 +25,20 @@ type candidate struct {
 	Hash       string `json:"hash"`
 	Body       string `json:"body"`
 	Truncated  bool   `json:"truncated"`
+	// AlsoAt names the other documents sharing this content, empty for the
+	// usual one-document case.
+	AlsoAt []string `json:"also_at,omitempty"`
+}
+
+// sharedHash reports whether every match is the same content under different
+// paths, which no longer prefix can tell apart.
+func sharedHash(matches []candidate) bool {
+	for _, m := range matches[1:] {
+		if m.Hash != matches[0].Hash {
+			return false
+		}
+	}
+	return true
 }
 
 var getCmd = &cobra.Command{
@@ -41,11 +55,14 @@ var getCmd = &cobra.Command{
 		defer a.Close()
 
 		// Match by content hash prefix. LIMIT bounds an over-short prefix.
+		// ponytail: past 10 documents sharing one hash the "also at" list is
+		// truncated; page it if anyone ever hits that.
 		rows, err := a.DB.QueryContext(ctx, `
 			SELECT d.collection, d.path, COALESCE(d.title, ''), d.content_hash, c.body
 			FROM documents d
 			JOIN content c ON c.hash = d.content_hash
 			WHERE d.content_hash LIKE ? AND d.active = 1
+			ORDER BY d.collection, d.path
 			LIMIT 10
 		`, id+"%")
 		if err != nil {
@@ -68,7 +85,7 @@ var getCmd = &cobra.Command{
 		switch {
 		case len(matches) == 0:
 			return fmt.Errorf("no document found with ID prefix %q", id)
-		case len(matches) > 1:
+		case len(matches) > 1 && !sharedHash(matches):
 			// Printing every match silently was a correctness bug: the caller
 			// could not tell one document from a pile of them.
 			var b strings.Builder
@@ -83,7 +100,13 @@ var getCmd = &cobra.Command{
 		if getMaxBytes < 0 {
 			return fmt.Errorf("--max-bytes must not be negative, got %d", getMaxBytes)
 		}
+		// Identical files dedupe to one content row, so several documents can
+		// share a hash. That is not an ambiguous prefix — no longer prefix
+		// exists — so return the content and name every path it lives at.
 		doc := matches[0]
+		for _, m := range matches[1:] {
+			doc.AlsoAt = append(doc.AlsoAt, fmt.Sprintf("qi://%s/%s", m.Collection, m.Path))
+		}
 		doc.Body, err = sliceLines(doc.Body, getLines)
 		if err != nil {
 			return err
@@ -105,6 +128,9 @@ var getCmd = &cobra.Command{
 		fmt.Fprintf(os.Stdout, "ID:         #%s\n", doc.Hash[:6])
 		fmt.Fprintf(os.Stdout, "Collection: %s\n", doc.Collection)
 		fmt.Fprintf(os.Stdout, "Path:       qi://%s/%s\n", doc.Collection, doc.Path)
+		for _, p := range doc.AlsoAt {
+			fmt.Fprintf(os.Stdout, "Also at:    %s\n", p)
+		}
 		fmt.Fprintf(os.Stdout, "Hash:       %s\n\n", doc.Hash)
 		fmt.Fprintf(os.Stdout, "%s\n", doc.Body)
 		if doc.Truncated {

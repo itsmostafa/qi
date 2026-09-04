@@ -113,3 +113,47 @@ func TestGetLineRangeRejectsBadSpec(t *testing.T) {
 		}
 	}
 }
+
+// Two files with identical bytes dedupe to one content row, so both documents
+// carry the same hash. No prefix can tell them apart — not even all 64
+// characters — so `qi get` must return the shared content instead of demanding
+// a longer prefix that cannot exist.
+func TestGetReturnsSharedContentForDuplicateDocuments(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "qi.db")
+	database, err := db.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if _, err := database.Exec(
+		`INSERT INTO content(hash, body) VALUES (?, 'shared body')`, hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO documents(collection, path, title, content_hash)
+		VALUES ('test', 'a.md', 'Doc A', ?), ('test', 'b.md', 'Doc B', ?)`, hash, hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	withIndexTestConfig(t, writeIndexTestConfig(t, fmt.Sprintf("database_path: %s\n", dbPath)))
+	withGetFlags(t, "", 0, "text")
+
+	out := captureIndexTestOutput(t, func() { err = getCmd.RunE(getCmd, []string{hash}) })
+	if err != nil {
+		t.Fatalf("a fully-qualified hash must resolve, got: %v", err)
+	}
+	for _, want := range []string{"shared body", "qi://test/a.md", "Also at:    qi://test/b.md"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	// A prefix spanning genuinely different hashes is still ambiguous.
+	withIndexTestConfig(t, makeGetTestConfig(t))
+	if err := getCmd.RunE(getCmd, []string{"abc123"}); err == nil {
+		t.Error("a prefix matching two distinct hashes must still error")
+	}
+}
