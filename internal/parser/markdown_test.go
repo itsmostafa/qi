@@ -195,3 +195,63 @@ func TestUndecodableFrontmatterIsStillStripped(t *testing.T) {
 		t.Error("body lost")
 	}
 }
+
+// docs/audit-2026-09-03.md:413 — a heading-only file indexed zero chunks, so
+// `qi search Unicorn` found nothing.
+func TestHeadingOnlyDocumentIsSearchable(t *testing.T) {
+	doc := parseMD(t, "# Unicorn Project\n")
+	if len(doc.Sections) != 1 {
+		t.Fatalf("got %d sections, want 1: %+v", len(doc.Sections), doc.Sections)
+	}
+	if doc.Sections[0].Text != "Unicorn Project" {
+		t.Errorf("Text = %q, want %q", doc.Sections[0].Text, "Unicorn Project")
+	}
+}
+
+// The fallback must not duplicate the heading into sections that have a body.
+func TestHeadingNotPrependedToBody(t *testing.T) {
+	doc := parseMD(t, "# Zebra\n\nbody\n")
+	if len(doc.Sections) != 1 || doc.Sections[0].Text != "body" {
+		t.Errorf("sections = %+v, want one section with text %q", doc.Sections, "body")
+	}
+}
+
+// Empty headings in a document that has body text somewhere get no chunk of
+// their own: chunks_fts indexes heading_path, so they are already searchable.
+func TestEmptyHeadingsGetNoChunkWhenTheDocumentHasBody(t *testing.T) {
+	doc := parseMD(t, "# A\n\n## B\n\nbody b\n\n## C\n\n### D\n\nbody d\n")
+	want := []string{"body b", "body d"}
+	if len(doc.Sections) != len(want) {
+		t.Fatalf("got %d sections, want %d: %+v", len(doc.Sections), len(want), doc.Sections)
+	}
+	for i, w := range want {
+		if doc.Sections[i].Text != w {
+			t.Errorf("section %d text = %q, want %q", i, doc.Sections[i].Text, w)
+		}
+	}
+	if doc.Sections[0].HeadingPath != "A > B" {
+		t.Errorf("HeadingPath = %q, want %q", doc.Sections[0].HeadingPath, "A > B")
+	}
+}
+
+// A document whose headings are all empty still needs one chunk, or it is
+// indexed active with nothing searchable.
+func TestAllEmptyHeadingsFallBackToTheFirstHeading(t *testing.T) {
+	doc := parseMD(t, "# A\n\n## B\n")
+	if len(doc.Sections) != 1 || doc.Sections[0].Text != "A" {
+		t.Fatalf("sections = %+v, want one section with text %q", doc.Sections, "A")
+	}
+}
+
+// Frontmatter promoted to a summary section must not count as body text, or a
+// frontmatter + heading-only document loses its heading entirely.
+func TestFrontmatterDoesNotSuppressTheHeadingFallback(t *testing.T) {
+	doc := parseMD(t, "---\ntitle: Foo\n---\n\n# Project Unicorn\n")
+	var joined string
+	for _, s := range doc.Sections {
+		joined += s.Text + "\n"
+	}
+	if !strings.Contains(joined, "Project Unicorn") {
+		t.Errorf("sections = %+v, want one containing %q", doc.Sections, "Project Unicorn")
+	}
+}
