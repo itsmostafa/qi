@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.12.0](https://github.com/itsmostafa/qi/compare/v0.11.0...v0.12.0) (2026-09-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **config:** generated collection names change. Indexed data migrates automatically through the existing OriginalName rename path, but scripts passing the old long name to -c must be updated.
+
+### Features
+
+* **config:** name collections after their directory ([08caed1](https://github.com/itsmostafa/qi/commit/08caed1194e1a0264ba9649b9c0a4a54cdeef4ce))
+* fix markdown indexing, add recency search, and reclaim database space ([b37cdaf](https://github.com/itsmostafa/qi/commit/b37cdaf8074e431bed3225f7f2ed000beb031413))
+* **search:** filter by date, collapse duplicates, and label score scales ([da1045e](https://github.com/itsmostafa/qi/commit/da1045e91c07c4f6b94767b8ac1bb02c05f2ed11))
+
+
+### Bug Fixes
+
+* **cli:** print local time in stats and make --verbose work ([6a323ae](https://github.com/itsmostafa/qi/commit/6a323aee303df6c676d7c0bb8405d022f81779c1))
+* **config:** assign collection names over the whole set when adding one ([3fd0a51](https://github.com/itsmostafa/qi/commit/3fd0a51be15583e0c86ea128a85108d83477b58c))
+* **config:** resolve removals with the whole-set naming algorithm ([6c77289](https://github.com/itsmostafa/qi/commit/6c772896082b881a5ad8c34c69672365cd3af541))
+* **config:** stop a depth cap from collapsing deep colliding names ([01916de](https://github.com/itsmostafa/qi/commit/01916de45ef39199d75ad40e7580da3a2015982e))
+* **db:** refuse a chained rename that cannot land safely ([130fee9](https://github.com/itsmostafa/qi/commit/130fee9e3dd155de57bc5244bd51071d51d6e740))
+* **db:** set busy_timeout in the connection init hook ([f8f4547](https://github.com/itsmostafa/qi/commit/f8f4547f3ee2996ddd8e8f0aa6161af7f0b44a81))
+* **db:** set busy_timeout in the connection init hook ([b4d8176](https://github.com/itsmostafa/qi/commit/b4d81764bdd550b97d2587c604cf887c0f3e4759))
+* **db:** stage collection renames so a chain cannot mix documents ([bc382c2](https://github.com/itsmostafa/qi/commit/bc382c25ac7d5a43e8d4da7004d5bd978c54f7a9))
+* **db:** stop a collection rename from deleting real documents ([fd8539c](https://github.com/itsmostafa/qi/commit/fd8539ce74cec6e25c329af1f91ccf917d2a6ce7))
+* **index:** store frontmatter metadata, reclaim space, add --force ([afce383](https://github.com/itsmostafa/qi/commit/afce3838abe1e44865384aeb87dfdf78a0b4ae54))
+* **parser:** accept date as an alias for timestamp ([0cb8299](https://github.com/itsmostafa/qi/commit/0cb82995aa54abfca322bf67bc451251d25c34fd))
+* **parser:** index list text and keep YAML frontmatter out of chunks ([8900b66](https://github.com/itsmostafa/qi/commit/8900b669760dac9dc683116c3f330912c83a324f))
+* **parser:** strip frontmatter even when its YAML does not decode ([b69cd64](https://github.com/itsmostafa/qi/commit/b69cd648fb6064a3de453dff41d66f8d961da8c8))
+* **search:** keep -n above bm25_top_k from capping the result count ([0e126e9](https://github.com/itsmostafa/qi/commit/0e126e910c4de12040d8720129e1a0377b427fbc))
+
 ## [0.11.0](https://github.com/itsmostafa/qi/compare/v0.10.0...v0.11.0) (2026-09-03)
 
 
