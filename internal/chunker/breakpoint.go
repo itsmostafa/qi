@@ -21,7 +21,15 @@ type BreakpointChunker struct {
 	MinSize    int // minimum chunk size before emitting
 }
 
+// defaultTargetSize is used when a non-positive target size is given. A
+// non-positive size makes the oversized-line split loop (offset += TargetSize)
+// spin forever, so it is never accepted.
+const defaultTargetSize = 512
+
 func NewBreakpointChunker(targetSize int) *BreakpointChunker {
+	if targetSize <= 0 {
+		targetSize = defaultTargetSize
+	}
 	return &BreakpointChunker{
 		TargetSize: targetSize,
 		MinSize:    targetSize / 4,

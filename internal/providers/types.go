@@ -21,9 +21,3 @@ type EmbeddingProvider interface {
 	Dimension() int
 	ModelName() string
 }
-
-// RerankProvider scores candidate passages for relevance to a query.
-type RerankProvider interface {
-	Rerank(ctx context.Context, query string, passages []string) ([]float64, error)
-	ModelName() string
-}

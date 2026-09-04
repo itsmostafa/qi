@@ -69,6 +69,10 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 	filters += dateFilter
 	args = append(args, dateArgs...)
 
+	// No SQL LIMIT: it would bound chunks, and one verbose file whose chunks
+	// fill the pool would starve every other match once the per-document
+	// collapse downstream keeps only its best chunk. Rows arrive in rank order
+	// and the scan below stops at poolSize distinct documents instead.
 	query := fmt.Sprintf(`
 		SELECT
 			d.id,
@@ -87,12 +91,10 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 		  AND d.active = 1
 		  %s
 		ORDER BY bm25(chunks_fts)
-		LIMIT ?
 	`, filters)
 
 	queryArgs := []any{HighlightOpen, HighlightClose, ftsQuery}
 	queryArgs = append(queryArgs, args...)
-	queryArgs = append(queryArgs, poolSize(opts))
 
 	rows, err := b.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
@@ -101,6 +103,8 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 	defer rows.Close()
 
 	var results []Result
+	seenDoc := map[int64]bool{}
+	pool := poolSize(opts)
 	rank := 1
 	for rows.Next() {
 		var r Result
@@ -111,6 +115,10 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 		); err != nil {
 			return nil, err
 		}
+		if seenDoc[r.DocID] {
+			continue // a document is represented by its best-ranked chunk
+		}
+		seenDoc[r.DocID] = true
 		r.Score = score
 		r.Scale = ScaleBM25
 		if opts.Explain {
@@ -118,6 +126,9 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 		}
 		results = append(results, r)
 		rank++
+		if len(results) >= pool {
+			break
+		}
 	}
 
 	return results, rows.Err()

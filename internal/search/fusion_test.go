@@ -112,3 +112,51 @@ func TestRRF_ArithmeticK60(t *testing.T) {
 		t.Errorf("expected RRF score ~%.6f, got %.6f", expected, got)
 	}
 }
+
+func TestRRF_FusesByDocument(t *testing.T) {
+	// Doc 20 matches once at rank 1; doc 10 matches twice, at ranks 2 and 3.
+	// Best-rank fusion gives doc 10 1/62, which stays behind doc 20's 1/61.
+	// Summing doc 10's chunks would give 1/62+1/63 > 1/61 and flip the order.
+	bm25 := []Result{
+		{DocID: 20, ChunkID: 3, Score: 3.0},
+		{DocID: 10, ChunkID: 1, Score: 2.0},
+		{DocID: 10, ChunkID: 2, Score: 1.0},
+	}
+	results := ReciprocalRankFusion(bm25, nil, 60)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results (one per document), got %d", len(results))
+	}
+	if results[0].DocID != 20 {
+		t.Errorf("expected doc 20 first, got doc %d", results[0].DocID)
+	}
+	if results[1].DocID != 10 || results[1].ChunkID != 1 {
+		t.Errorf("expected doc 10 represented by its best chunk 1, got doc %d chunk %d",
+			results[1].DocID, results[1].ChunkID)
+	}
+	if want := 1.0 / 62.0; results[1].Score < want-1e-9 || results[1].Score > want+1e-9 {
+		t.Errorf("doc 10 scored %.6f, want %.6f (best rank only, not summed)", results[1].Score, want)
+	}
+}
+
+// The chunk shown must come from the list that ranked the document better, or
+// the snippet contradicts the ranks printed beside it.
+func TestRRF_RepresentativeChunkComesFromTheBetterRankedList(t *testing.T) {
+	bm25 := []Result{
+		{DocID: 99, ChunkID: 900},
+		{DocID: 98, ChunkID: 800},
+		{DocID: 10, ChunkID: 1},
+	}
+	vec := []Result{{DocID: 10, ChunkID: 2}}
+
+	for _, r := range ReciprocalRankFusion(bm25, vec, 60) {
+		if r.DocID != 10 {
+			continue
+		}
+		if r.ChunkID != 2 {
+			t.Errorf("doc 10 represented by chunk %d, want chunk 2 (vector rank 1 beats bm25 rank 3)", r.ChunkID)
+		}
+		return
+	}
+	t.Fatal("doc 10 missing from the fused results")
+}

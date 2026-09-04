@@ -31,11 +31,11 @@ func TestCapResultsLimitsChunksPerDocument(t *testing.T) {
 		res(1, 3, "c", 7, ""), res(2, 4, "d", 6, ""),
 	}
 	got := capResults(in)
-	if len(got) != 3 {
-		t.Fatalf("got %d results, want 3: %+v", len(got), got)
+	if len(got) != 2 {
+		t.Fatalf("got %d results, want 2: %+v", len(got), got)
 	}
-	if got[2].DocID != 2 {
-		t.Errorf("document 1 exceeded the cap: %+v", got)
+	if got[0].DocID != 1 || got[0].ChunkID != 1 || got[1].DocID != 2 {
+		t.Errorf("want document 1's best chunk then document 2: %+v", got)
 	}
 }
 

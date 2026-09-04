@@ -122,6 +122,28 @@ func TestStatsSaysNotConfiguredForLexicalOnlyDatabase(t *testing.T) {
 	}
 }
 
+// A config holding provider API keys must not stay readable by other local users.
+func TestDoctorWarnsAboutGroupReadableConfig(t *testing.T) {
+	cfgPath := makeDoctorTestConfig(t, false)
+	if err := os.Chmod(cfgPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withIndexTestConfig(t, cfgPath)
+
+	output := captureIndexTestOutput(t, func() { _ = doctorCmd.RunE(doctorCmd, nil) })
+	if !strings.Contains(output, "WARN  config file is readable by other local users") {
+		t.Fatalf("no permission warning for a 0644 config:\n%s", output)
+	}
+
+	if err := os.Chmod(cfgPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output = captureIndexTestOutput(t, func() { _ = doctorCmd.RunE(doctorCmd, nil) })
+	if strings.Contains(output, "readable by other local users") {
+		t.Fatalf("warned about a private config:\n%s", output)
+	}
+}
+
 func makeDoctorTestConfig(t *testing.T, embedding bool) string {
 	t.Helper()
 	dir := t.TempDir()

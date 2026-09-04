@@ -19,7 +19,7 @@ qi supports three search modes:
 
 - **lexical**: BM25 full-text search
 - **hybrid**: BM25 + vector search with Reciprocal Rank Fusion
-- **deep**: hybrid + reranking
+- **deep**: alias for hybrid
 
 ## Configuration
 

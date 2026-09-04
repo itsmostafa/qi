@@ -7,7 +7,7 @@ type Chunk struct {
 	Seq         int
 	Text        string
 	HeadingPath string
-	Ordinal     int // byte offset in original document
+	Ordinal     int // byte offset of the section heading this chunk came from
 }
 
 // Chunker splits a parsed document into indexable chunks.

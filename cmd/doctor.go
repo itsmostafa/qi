@@ -24,6 +24,17 @@ var doctorCmd = &cobra.Command{
 			}
 		}
 
+		// Warn only: repairing modes behind the user's back is worse than saying so.
+		warnPermissive := func(label, path string) {
+			info, err := os.Stat(path)
+			if err != nil {
+				return
+			}
+			if mode := info.Mode().Perm(); mode&0o077 != 0 {
+				fmt.Printf("  WARN  %s is readable by other local users (%#o): chmod 600 %s\n", label, mode, path)
+			}
+		}
+
 		fmt.Println("qi doctor")
 		fmt.Println()
 
@@ -34,6 +45,7 @@ var doctorCmd = &cobra.Command{
 		}
 		_, statErr := os.Stat(cfgPath)
 		check("config file exists", statErr)
+		warnPermissive("config file", cfgPath)
 
 		var cfg *config.Config
 		if statErr == nil {
@@ -55,6 +67,9 @@ var doctorCmd = &cobra.Command{
 			defer database.Close()
 			check("database opens", nil)
 			check("database ping", database.Ping(ctx))
+		}
+		for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+			warnPermissive("database file", p)
 		}
 
 		// Collections

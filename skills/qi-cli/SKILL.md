@@ -58,21 +58,30 @@ Semantic/hybrid search. Falls back gracefully to BM25 if the embedding provider 
 qi query "how does auth work"
 qi query "deploy pipeline" --mode lexical   # BM25 only
 qi query "deployment steps" --mode hybrid   # BM25 + vector (default)
-qi query "critical path" --mode deep        # currently an alias for hybrid; reranking is not implemented
+qi query "critical path" --mode deep        # alias for hybrid
 qi query "question" --explain               # show BM25/vector/RRF score breakdown
 ```
 
 **Modes:**
 - `lexical` — BM25 only
-- `hybrid` (default) — BM25 + vector fused with RRF; skips vector if BM25 has a clear winner
-- `deep` — currently identical to `hybrid`. The reranking pass it is meant to add is not implemented, and `providers.rerank` / `rerank_top_k` are read by nothing.
+- `hybrid` — BM25 + vector fused with RRF; skips vector if BM25 has a clear winner
+- `deep` — alias for `hybrid`
+
+With no `--mode`, the mode comes from `search.default_mode` in the config (`hybrid` by default).
 
 ### `qi get <id>`
-Retrieve a document by its 6-character hash prefix (shown in search results).
+Retrieve a document by its 6-character hash prefix (shown in search results). An
+ambiguous prefix is an error listing the candidates, never a dump of all of them.
 
 ```bash
 qi get abc123
+qi get abc123 --lines 40:80      # 1-indexed, inclusive; "40:" and ":80" also work
+qi get abc123 --max-bytes 4096   # truncate and say so (0 = unlimited)
+qi get abc123 --format json      # {collection, path, title, hash, body, truncated}
 ```
+
+Prefer `--lines`/`--max-bytes` over reading whole documents: they are what keeps
+a retrieved document from swallowing an agent's context.
 
 ### `qi list`
 List all collections defined in config (name and path).
@@ -146,15 +155,10 @@ providers:
     dimension: 768
     max_input_chars: 0                    # optional — truncate long texts before embedding (0 = no limit)
 
-  rerank:                                 # parsed but unused: reranking is not implemented
-    base_url: http://localhost:8080
-    model: bge-reranker-v2-m3
-
 search:
-  default_mode: hybrid                    # lexical | hybrid | deep
+  default_mode: hybrid                    # lexical | hybrid (deep is an alias for hybrid)
   bm25_top_k: 50
   vector_top_k: 50
-  rerank_top_k: 10
   rrf_k: 60
   chunk_size: 512
   prefer_extensions: [.md, .txt]          # optional — boost results with these extensions
@@ -191,7 +195,7 @@ providers:
 - **BM25** — SQLite FTS5. Always available, very fast, good for keyword queries.
 - **Vector KNN** — Cosine similarity over embedding BLOBs in SQLite. Requires an embedding provider. Captures semantic intent.
 - **Hybrid (RRF)** — Runs both, fuses rankings with Reciprocal Rank Fusion (`score = Σ 1/(k + rank)`). Skips vector if BM25 has a dominant winner (top score > 3× second place).
-- **Deep** — Accepted, but identical to Hybrid today. No reranker runs.
+- **Deep** — Accepted as an alias of Hybrid.
 
 ---
 

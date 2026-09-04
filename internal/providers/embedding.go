@@ -5,13 +5,30 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/itsmostafa/qi/internal/config"
 )
+
+// A legitimate response is roughly batch_size × dimension × 10 bytes of JSON;
+// 64 MiB leaves room for large batches while capping a runaway body.
+const maxResponseBytes = 64 << 20
+
+// excerpt returns a short, single-line slice of a response body for use in
+// error messages. Fields collapses every run of whitespace, including the
+// control characters an HTML error page arrives wrapped in.
+func excerpt(b []byte) string {
+	s := strings.Join(strings.Fields(string(b)), " ")
+	if len(s) > 200 {
+		s = strings.ToValidUTF8(s[:200], "") + "…"
+	}
+	return s
+}
 
 type embeddingProvider struct {
 	cfg    *config.EmbeddingProviderConfig
@@ -111,9 +128,23 @@ func (p *embeddingProvider) embedBatch(ctx context.Context, texts []string) ([][
 	}
 	defer resp.Body.Close()
 
+	// Read through a bounded reader and check status before decoding: an HTML
+	// proxy error used to surface as a JSON parse error, and an unbounded body
+	// could be read entirely into memory.
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading embedding response: %w", err)
+	}
+	if len(respBody) > maxResponseBytes {
+		return nil, fmt.Errorf("embedding response exceeds %d bytes", maxResponseBytes)
+	}
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("embedding API returned %s: %s", resp.Status, excerpt(respBody))
+	}
+
 	var result embeddingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding embedding response: %w", err)
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("decoding embedding response: %w: %s", err, excerpt(respBody))
 	}
 
 	if result.Error != nil {

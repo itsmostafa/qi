@@ -192,27 +192,35 @@ providers:
 	}
 }
 
-func TestLoad_Rerank_EnvBaseURL(t *testing.T) {
-	t.Setenv("RERANK_BASE_URL", "http://reranker.local:8080")
-	path := writeTempConfig(t, `
+func TestLoad_RejectsBadSearchSettings(t *testing.T) {
+	for _, tt := range []struct {
+		name, yaml, want string
+	}{
+		{"zero chunk size", "search:\n  chunk_size: 0\n", "chunk_size"},
+		{"negative chunk size", "search:\n  chunk_size: -1\n", "chunk_size"},
+		{"unknown mode", "search:\n  default_mode: fuzzy\n", "default_mode"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, "collections:\n  - path: /tmp\n"+tt.yaml))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected %s error, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestLoad_NormalizesExtensions(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, `
 collections:
-  - name: docs
-    path: /tmp
-providers:
-  rerank:
-    name: jina
-    base_url: ${RERANK_BASE_URL}
-    model: jina-reranker-v2-base-multilingual
-`)
-	cfg, err := Load(path)
+  - path: /tmp
+    extensions: [md, .MD, .txt]
+`))
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if cfg.Providers.Rerank == nil {
-		t.Fatal("expected rerank provider")
-	}
-	if cfg.Providers.Rerank.BaseURL != "http://reranker.local:8080" {
-		t.Errorf("expected expanded base_url, got %q", cfg.Providers.Rerank.BaseURL)
+	got := strings.Join(cfg.Collections[0].Extensions, ",")
+	if got != ".md,.md,.txt" {
+		t.Errorf("extensions = %q, want \".md,.md,.txt\"", got)
 	}
 }
 

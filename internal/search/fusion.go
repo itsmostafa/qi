@@ -31,9 +31,16 @@ func applyExtensionBoost(results []Result, exts []string, boost float64) []Resul
 	return results
 }
 
-// ReciprocalRankFusion merges BM25 and vector result lists using RRF.
+// ReciprocalRankFusion merges BM25 and vector result lists using RRF, fusing by
+// document: each list contributes a document once, at its best rank, so a
+// verbose file cannot buy rank with extra matching chunks or take extra slots.
 // k is the rank constant (default 60 per the paper).
 // Returns results sorted by descending RRF score.
+//
+// ponytail: the better-ranked of the document's two chunks represents it and
+// the siblings are dropped. Keeping them as extra evidence for context
+// expansion needs a Result that can carry more than one chunk, which nothing
+// asks for yet.
 func ReciprocalRankFusion(bm25 []Result, vec []Result, k int) []Result {
 	if k <= 0 {
 		k = 60
@@ -48,26 +55,33 @@ func ReciprocalRankFusion(bm25 []Result, vec []Result, k int) []Result {
 		vecDist  float64
 	}
 
-	byChunk := map[int64]*score{}
+	byDoc := map[int64]*score{}
 
 	for i, r := range bm25 {
-		rank := i + 1
-		s, ok := byChunk[r.ChunkID]
-		if !ok {
-			byChunk[r.ChunkID] = &score{result: r, bm25Rank: rank, bm25Sc: r.Score}
-			s = byChunk[r.ChunkID]
+		if _, ok := byDoc[r.DocID]; ok {
+			continue // already counted at a better rank
 		}
-		s.rrfScore += 1.0 / float64(k+rank)
-		s.bm25Rank = rank
-		s.bm25Sc = r.Score
+		rank := i + 1
+		byDoc[r.DocID] = &score{
+			result:   r,
+			rrfScore: 1.0 / float64(k+rank),
+			bm25Rank: rank,
+			bm25Sc:   r.Score,
+		}
 	}
 
 	for i, r := range vec {
 		rank := i + 1
-		s, ok := byChunk[r.ChunkID]
+		s, ok := byDoc[r.DocID]
 		if !ok {
-			byChunk[r.ChunkID] = &score{result: r}
-			s = byChunk[r.ChunkID]
+			s = &score{result: r}
+			byDoc[r.DocID] = s
+		} else if s.vecRank > 0 {
+			continue // already counted at a better rank
+		} else if s.bm25Rank == 0 || rank < s.bm25Rank {
+			// Show the chunk the better-ranked list picked, or the snippet
+			// contradicts the ranks reported beside it.
+			s.result = r
 		}
 		s.rrfScore += 1.0 / float64(k+rank)
 		s.vecRank = rank
@@ -75,8 +89,8 @@ func ReciprocalRankFusion(bm25 []Result, vec []Result, k int) []Result {
 	}
 
 	// Flatten and sort
-	results := make([]Result, 0, len(byChunk))
-	for _, s := range byChunk {
+	results := make([]Result, 0, len(byDoc))
+	for _, s := range byDoc {
 		r := s.result
 		r.Score = s.rrfScore
 		r.Scale = ScaleRRF

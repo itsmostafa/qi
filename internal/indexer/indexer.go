@@ -40,6 +40,12 @@ var defaultExtensions = map[string]bool{
 	".txt": true, ".text": true,
 }
 
+// maxFileSize caps a single indexed file. Reading, parsing and chunking hold
+// several full-size copies at once — one 50 MiB file peaked at ~543 MiB RSS.
+// ponytail: fixed constant, no knob. A `max_file_size` key on
+// config.Collection is the upgrade path if anyone needs a different cap.
+const maxFileSize = 10 << 20 // 10 MiB
+
 // Stats summarises an index run.
 type Stats struct {
 	FilesScanned int
@@ -115,6 +121,7 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 	// failure rather than reporting a successful (but stale) collection run.
 	seenPaths := map[string]bool{}
 	var fileErrs []error
+	var failedPaths []string
 
 	err = filepath.WalkDir(canonicalRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -168,6 +175,7 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 			err = fmt.Errorf("indexing %s: %w", relPath, err)
 			slog.Warn("failed to index file", "path", relPath, "error", err)
 			fileErrs = append(fileErrs, err)
+			failedPaths = append(failedPaths, relPath)
 		}
 
 		return nil
@@ -178,6 +186,15 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 			runErr = errors.Join(runErr, fmt.Errorf("finishing index run: %w", finishErr))
 		}
 		return stats, runErr
+	}
+
+	// A file that failed to read keeps its previous version active, deliberately
+	// — a transient failure must not delete good data. Say so, or the run reports
+	// an error with no hint that stale text is still being served.
+	if stale := idx.staleActivePaths(ctx, col.Name, failedPaths); len(stale) > 0 {
+		fileErrs = append(fileErrs, fmt.Errorf(
+			"%d document(s) could not be re-read; their previously indexed content is still searchable: %s",
+			len(stale), strings.Join(stale, ", ")))
 	}
 
 	// Deactivate documents that no longer exist on disk
@@ -206,6 +223,35 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 // document bodies are never referenced again, and SQLite hands freed pages to a
 // freelist it never returns to the filesystem.
 func (idx *Indexer) compact(ctx context.Context) error {
+	// A document deactivated because its file was deleted from disk keeps its
+	// plaintext body — including removed secrets — for the reactivation
+	// fast-path in indexFile. Nothing else reads active = 0 (search, stats, get
+	// and the embedder all filter active = 1), so drop the rows and let the
+	// orphan prune below reclaim the text.
+	// ponytail: costs the reactivation fast-path — a file that comes back is
+	// re-chunked and re-embedded instead of reactivated. A retention window
+	// (keep bodies for N days after deactivation) is the upgrade path.
+	// One transaction: compact errors are logged, not returned, so a chunk
+	// delete that committed without its document delete would leave an inactive
+	// row with no chunks for the reactivation fast-path to restore.
+	if err := func() error {
+		tx, err := idx.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM chunks WHERE doc_id IN (SELECT id FROM documents WHERE active = 0)`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM documents WHERE active = 0`); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}(); err != nil {
+		return fmt.Errorf("deleting deactivated documents: %w", err)
+	}
+
 	// A document that changed content leaves its previous body behind, holding
 	// superseded text — including anything since redacted — in the database.
 	if _, err := idx.db.ExecContext(ctx, `
@@ -349,6 +395,22 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	}
 
 	return tx.Commit()
+}
+
+// staleActivePaths returns the failed paths whose previously indexed document
+// is still active, i.e. still searchable with content this run could not verify.
+// ponytail: one query per failure; failures are rare, an IN-list if that changes.
+func (idx *Indexer) staleActivePaths(ctx context.Context, collection string, failed []string) []string {
+	var stale []string
+	for _, p := range failed {
+		var n int
+		if err := idx.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM documents WHERE collection=? AND path=? AND active=1`,
+			collection, p).Scan(&n); err == nil && n > 0 {
+			stale = append(stale, p)
+		}
+	}
+	return stale
 }
 
 func (idx *Indexer) deactivateMissing(ctx context.Context, collection string, seen map[string]bool) (int, error) {

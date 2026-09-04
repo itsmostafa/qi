@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/itsmostafa/qi/internal/config"
@@ -143,5 +144,36 @@ func TestEmbeddingProvider_NoAuthHeader_WhenKeyEmpty(t *testing.T) {
 	}
 	if gotAuth != "" {
 		t.Errorf("expected no Authorization header, got %q", gotAuth)
+	}
+}
+
+// An HTML proxy error used to be decoded as JSON, so the caller saw a parse
+// error instead of the HTTP status.
+func TestEmbeddingProviderNonJSONErrorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html><body>Bad Gateway</body></html>"))
+	}))
+	defer srv.Close()
+
+	p := NewEmbedding(&config.EmbeddingProviderConfig{
+		BaseURL:   srv.URL,
+		Model:     "test-model",
+		Dimension: 4,
+	})
+	_, err := p.Embed(context.Background(), []string{"hello"})
+	if err == nil {
+		t.Fatal("expected an error for a 502 response")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "502") {
+		t.Errorf("error should name the HTTP status, got: %v", err)
+	}
+	if strings.Contains(msg, "decoding") || strings.Contains(msg, "invalid character") {
+		t.Errorf("error should not be a JSON parse error, got: %v", err)
+	}
+	if !strings.Contains(msg, "Bad Gateway") {
+		t.Errorf("error should include a body excerpt, got: %v", err)
 	}
 }

@@ -28,8 +28,10 @@ Always run `task check` before finishing any code change to ensure all checks pa
 - **Auto-generated collection names**: A collection is named after its own directory (`~/Projects/tools/qi` → `qi`). Colliding names absorb leading path segments until unique (`work-notes`, `personal-notes`). The `--name` flag was removed from `index`. Legacy names are normalized on startup and indexed rows migrate via `RenameCollectionData`.
 - **Query relaxation**: BM25 search automatically falls back from conjunctive to disjunctive matching for natural-language queries that return zero results.
 - **Frontmatter is document metadata, not body text**: `internal/parser/frontmatter.go` strips YAML frontmatter before goldmark parses. `title`, `timestamp`/`date` and `tags` become document-level fields; the useful ones are re-emitted as one leading section of plain prose so they stay searchable.
-- **Post-retrieval pass**: `search.Finalize` (`internal/search/postprocess.go`) applies date sort, duplicate-snippet collapse and a 2-chunk-per-document cap over the whole candidate pool, then truncates to the caller's limit. Retrievers no longer truncate; commands call `Finalize`.
-- **Compaction on index**: every `qi index` prunes orphaned content blobs, runs FTS5 `optimize`, and `VACUUM`s when the freelist exceeds a quarter of the file.
+- **One result per document**: both retrievers keep only a document's best-ranked chunk — BM25 stops at `poolSize` *distinct documents* rather than applying a SQL `LIMIT` to chunks, and the vector KNN dedupes before truncating — and `ReciprocalRankFusion` keys on document ID, counting each document once at its best rank. Bounding the pool by chunks let one verbose file starve every other match.
+- **Post-retrieval pass**: `search.Finalize` (`internal/search/postprocess.go`) applies date sort, duplicate-snippet collapse and a backstop one-per-document pass over the whole candidate pool, then truncates to the caller's limit. Retrievers no longer truncate; commands call `Finalize`.
+- **Compaction on index**: every `qi index` hard-deletes deactivated documents, prunes orphaned content blobs, runs FTS5 `optimize`, and `VACUUM`s when the freelist exceeds a quarter of the file. A restored file therefore re-chunks and re-embeds rather than reactivating.
+- **Resource limits**: files over 10 MiB are refused per-file (`maxFileSize`, `internal/indexer`); a read failure never deactivates a good document, but the run names the paths whose stale content is still searchable and exits nonzero.
 - **Auto-embed on index**: When an embedder is configured, chunks are embedded immediately after indexing without a separate step.
 - **Config**: Raw `gopkg.in/yaml.v3`, no viper. `~` expansion + relative path resolution.
 
@@ -46,7 +48,7 @@ internal/
   indexer/            Filesystem walker, SHA-256 change detection, embedder
   output/             Text/JSON formatters
   parser/             Document parsers (Markdown via goldmark, plaintext)
-  providers/          HTTP adapters for embedding and rerank APIs
+  providers/          HTTP adapters for embedding APIs
   search/             BM25, vector KNN, RRF fusion, hybrid
   version/            Build-time version injection
 ```

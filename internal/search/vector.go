@@ -109,9 +109,22 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 		return candidates[i].dist < candidates[j].dist
 	})
 
-	if topK < len(candidates) {
-		candidates = candidates[:topK]
+	// One chunk per document, for the same reason BM25 stops at poolSize
+	// distinct documents: a verbose file must not fill the pool with chunks
+	// that collapse to a single result later.
+	deduped := candidates[:0:0]
+	seenDoc := map[int64]bool{}
+	for _, c := range candidates {
+		if seenDoc[c.DocID] {
+			continue
+		}
+		seenDoc[c.DocID] = true
+		deduped = append(deduped, c)
+		if len(deduped) >= topK {
+			break
+		}
 	}
+	candidates = deduped
 
 	results := make([]Result, len(candidates))
 	for i, c := range candidates {
