@@ -120,3 +120,30 @@ func TestRenameCollectionDataKeepsDifferentFilesSharingAPath(t *testing.T) {
 	// rather than being deleted.
 	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'old'`, 1)
 }
+
+// One collection's old name is another's new name. Renaming in place would
+// merge the chain's documents into whichever name was still occupied.
+func TestRenameCollectionsHandlesChainedNames(t *testing.T) {
+	ctx := context.Background()
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "qi.db"))
+	if err != nil {
+		t.Fatalf("opening db: %v", err)
+	}
+	defer database.Close()
+
+	insertRenameTestDocument(t, database, "y-x-foo", "a.md", "from y")
+	insertRenameTestDocument(t, database, "x-foo", "b.md", "from x")
+
+	if err := database.RenameCollections(ctx, [][2]string{
+		{"y-x-foo", "x-foo"},
+		{"x-foo", "foo"},
+	}); err != nil {
+		t.Fatalf("renaming collections: %v", err)
+	}
+
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'x-foo' AND path = 'a.md'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'x-foo'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'foo' AND path = 'b.md'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'foo'`, 1)
+	assertDBCount(t, database, `SELECT COUNT(*) FROM documents WHERE collection = 'y-x-foo'`, 0)
+}

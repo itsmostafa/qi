@@ -33,11 +33,9 @@ func New(ctx context.Context, cfgPath string) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)
 	}
-	for _, col := range normalizableLegacyCollections(cfg.Collections) {
-		if err := database.RenameCollectionData(ctx, col.OriginalName, col.Name); err != nil {
-			_ = database.Close()
-			return nil, fmt.Errorf("normalizing collection %q: %w", col.Name, err)
-		}
+	if err := database.RenameCollections(ctx, legacyRenames(cfg.Collections)); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("normalizing collection names: %w", err)
 	}
 
 	// The embedding fingerprint identifies which provider endpoint and
@@ -72,28 +70,30 @@ func (a *App) Close() error {
 	return a.DB.Close()
 }
 
-func normalizableLegacyCollections(collections []config.Collection) []config.Collection {
-	currentNames := map[string]bool{}
+func legacyRenames(collections []config.Collection) [][2]string {
+	stableNames := map[string]bool{}
 	legacyNameCounts := map[string]int{}
 	for _, col := range collections {
-		currentNames[col.Name] = true
-		if col.OriginalName != "" && col.OriginalName != col.Name {
-			legacyNameCounts[col.OriginalName]++
+		if col.OriginalName == "" || col.OriginalName == col.Name {
+			// Nothing moves out of this name, so its rows stay its own.
+			stableNames[col.Name] = true
+			continue
 		}
+		legacyNameCounts[col.OriginalName]++
 	}
 
-	normalizable := make([]config.Collection, 0, len(collections))
+	renames := make([][2]string, 0, len(collections))
 	for _, col := range collections {
 		if col.OriginalName == "" || col.OriginalName == col.Name {
 			continue
 		}
-		if legacyNameCounts[col.OriginalName] > 1 {
+		// Two collections claiming one legacy name, or a legacy name that is
+		// also a collection's settled name: the rows under it are ambiguous, so
+		// leave them where they are.
+		if legacyNameCounts[col.OriginalName] > 1 || stableNames[col.OriginalName] {
 			continue
 		}
-		if currentNames[col.OriginalName] {
-			continue
-		}
-		normalizable = append(normalizable, col)
+		renames = append(renames, [2]string{col.OriginalName, col.Name})
 	}
-	return normalizable
+	return renames
 }
