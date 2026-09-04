@@ -519,3 +519,26 @@ func TestAssignCollectionNamesTerminatesOnIdenticalPaths(t *testing.T) {
 		t.Errorf("identical paths got different names: %v", got)
 	}
 }
+
+// A collision-lengthened name must still resolve on removal: the config stores
+// the short legacy name, but every command refers to the assigned one.
+func TestRemoveCollectionResolvesCollisionLengthenedName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("collections:\n  - name: notes\n    path: /work/notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddCollection(path, Collection{Path: "/personal/notes"}); err != nil {
+		t.Fatalf("AddCollection: %v", err)
+	}
+	if err := RemoveCollection(path, "work-notes"); err != nil {
+		t.Fatalf("RemoveCollection(work-notes): %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Collections) != 1 || cfg.Collections[0].Path != "/personal/notes" {
+		t.Fatalf("collections = %+v, want only /personal/notes", cfg.Collections)
+	}
+}

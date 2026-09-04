@@ -36,10 +36,9 @@ var deleteCmd = &cobra.Command{
 			return fmt.Errorf("collection %q not found", name)
 		}
 
-		if err := a.DB.DeleteCollection(ctx, targetName); err != nil {
-			return fmt.Errorf("deleting collection data: %w", err)
-		}
-
+		// Config first: a failure here leaves the data intact and the command
+		// repeatable. The other order deletes the documents and then reports an
+		// error, with the collection still listed and nothing left to delete.
 		if inConfig {
 			cfgPath := cfgFile
 			if cfgPath == "" {
@@ -48,6 +47,10 @@ var deleteCmd = &cobra.Command{
 			if err := config.RemoveCollection(cfgPath, targetName); err != nil {
 				return fmt.Errorf("removing collection from config: %w", err)
 			}
+		}
+
+		if err := a.DB.DeleteCollection(ctx, targetName); err != nil {
+			return fmt.Errorf("deleting collection data: %w", err)
 		}
 
 		fmt.Printf("Deleted collection %q\n", targetName)

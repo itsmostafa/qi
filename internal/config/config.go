@@ -311,6 +311,16 @@ func RemoveCollection(configPath string, name string) error {
 			continue
 		}
 		seq := root.Content[i+1]
+
+		// Name the whole set, the way Load does. A per-path basename would miss
+		// the lengthened name a collision produced ("work-notes"), and deleting
+		// data under a name the config cannot then find loses the entry.
+		resolved := make([]string, len(seq.Content))
+		for j, item := range seq.Content {
+			resolved[j] = resolveConfigFilePath(configDir, mappingValue(item, "path"))
+		}
+		assigned := AssignCollectionNames(resolved)
+
 		exactIndex := -1
 		exactMatches := 0
 		legacyIndex := -1
@@ -320,7 +330,7 @@ func RemoveCollection(configPath string, name string) error {
 			itemPath := mappingValue(item, "path")
 			generatedName := ""
 			if itemPath != "" {
-				generatedName = SlugFromPath(resolveConfigFilePath(configDir, itemPath))
+				generatedName = assigned[j]
 			}
 			if generatedName == name {
 				exactIndex = j
