@@ -142,13 +142,11 @@ func DefaultConfig() *Config {
 	return &Config{
 		DatabasePath: DefaultDBPath(),
 		Search: SearchConfig{
-			DefaultMode:  "hybrid",
-			BM25TopK:     50,
-			VectorTopK:   50,
-			RerankTopK:   10,
-			RRFK:         60,
-			ChunkSize:    512,
-			ChunkOverlap: 64,
+			DefaultMode: "hybrid",
+			BM25TopK:    50,
+			VectorTopK:  50,
+			RRFK:        60,
+			ChunkSize:   512,
 		},
 	}
 }
@@ -183,13 +181,11 @@ providers:
   #   dimension: 1536
 
 search:
-  default_mode: hybrid   # lexical | hybrid | deep
+  default_mode: hybrid   # lexical | hybrid (deep is an alias for hybrid)
   bm25_top_k: 50
   vector_top_k: 50
-  rerank_top_k: 10
   rrf_k: 60
   chunk_size: 512
-  chunk_overlap: 64
   # prefer_extensions: [.md, .txt]  # boost scores for these file types
   # extension_boost: 2.0            # multiplier applied to preferred extensions (default 2.0)
 `

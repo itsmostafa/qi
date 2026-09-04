@@ -50,25 +50,16 @@ func (c *EmbeddingProviderConfig) Fingerprint() string {
 	return hex.EncodeToString(sum[:])
 }
 
-type RerankProviderConfig struct {
-	Name    string `yaml:"name"`
-	BaseURL string `yaml:"base_url"`
-	Model   string `yaml:"model"`
-}
-
 type Providers struct {
 	Embedding *EmbeddingProviderConfig `yaml:"embedding,omitempty"`
-	Rerank    *RerankProviderConfig    `yaml:"rerank,omitempty"`
 }
 
 type SearchConfig struct {
 	DefaultMode      string   `yaml:"default_mode"`
 	BM25TopK         int      `yaml:"bm25_top_k"`
 	VectorTopK       int      `yaml:"vector_top_k"`
-	RerankTopK       int      `yaml:"rerank_top_k"`
 	RRFK             int      `yaml:"rrf_k"`
 	ChunkSize        int      `yaml:"chunk_size"`
-	ChunkOverlap     int      `yaml:"chunk_overlap"`
 	PreferExtensions []string `yaml:"prefer_extensions,omitempty"`
 	ExtensionBoost   float64  `yaml:"extension_boost,omitempty"`
 }
@@ -105,6 +96,7 @@ func Load(path string) (*Config, error) {
 	cfg.expandEnvVars()
 	cfg.resolveRelativePaths(configDir)
 	cfg.normalizeCollectionNames()
+	cfg.normalizeExtensions()
 	cfg.applyEnvOverrides()
 
 	if err := cfg.validate(); err != nil {
@@ -128,6 +120,17 @@ func (c *Config) normalizeCollectionNames() {
 			c.Collections[i].OriginalName = c.Collections[i].Name
 		}
 		c.Collections[i].Name = generated[i]
+	}
+}
+
+// normalizeExtensions lowercases collection extensions and gives each a leading
+// dot, so a configured "md" or ".MD" matches the indexer's lowercased
+// filepath.Ext instead of silently matching nothing.
+func (c *Config) normalizeExtensions() {
+	for i := range c.Collections {
+		for j, ext := range c.Collections[i].Extensions {
+			c.Collections[i].Extensions[j] = "." + strings.ToLower(strings.TrimLeft(strings.TrimSpace(ext), "."))
+		}
 	}
 }
 
@@ -155,9 +158,6 @@ func (c *Config) expandEnvVars() {
 	if emb := c.Providers.Embedding; emb != nil {
 		emb.APIKey = os.ExpandEnv(emb.APIKey)
 		emb.BaseURL = os.ExpandEnv(emb.BaseURL)
-	}
-	if rer := c.Providers.Rerank; rer != nil {
-		rer.BaseURL = os.ExpandEnv(rer.BaseURL)
 	}
 }
 
@@ -415,6 +415,14 @@ func writeConfigNode(configPath string, doc *yaml.Node) error {
 func (c *Config) validate() error {
 	if c.Providers.Embedding != nil && c.Providers.Embedding.Dimension <= 0 {
 		return fmt.Errorf("embedding dimension must be positive, got %d", c.Providers.Embedding.Dimension)
+	}
+	if c.Search.ChunkSize <= 0 {
+		return fmt.Errorf("search.chunk_size must be positive, got %d", c.Search.ChunkSize)
+	}
+	switch c.Search.DefaultMode {
+	case "lexical", "hybrid", "deep":
+	default:
+		return fmt.Errorf("search.default_mode %q: use lexical, hybrid, or deep", c.Search.DefaultMode)
 	}
 	seen := map[string]bool{}
 	seenPaths := map[string]string{}

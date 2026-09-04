@@ -31,19 +31,12 @@ providers:
   #   max_input_chars: 24000   # optional safety net: truncate texts over ~6k tokens (omit/0 = no limit)
   #   api_key: ${OPENAI_API_KEY}   # optional; ${VAR} is read from the environment
 
-  # Reranking provider (optional, used with --mode deep)
-  # rerank:
-  #   name: local-rerank
-  #   base_url: http://localhost:8080
-  #   model: bge-reranker-v2-m3
 
 search:
   default_mode: hybrid   # lexical | hybrid | deep
   bm25_top_k: 50         # Candidates from BM25 for fusion
   vector_top_k: 50       # Candidates from vector search for fusion
-  rerank_top_k: 10       # Top N passed to reranker in deep mode
   rrf_k: 60              # Reciprocal Rank Fusion constant (default 60)
   chunk_size: 512        # Target chunk size in characters
-  chunk_overlap: 64      # Not used in break-point chunker (reserved)
   # prefer_extensions: [.md, .txt]   # Boost scores for these file types
   # extension_boost: 2.0             # Multiplier applied to preferred extensions (default 2.0)

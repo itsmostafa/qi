@@ -35,12 +35,17 @@ var queryCmd = &cobra.Command{
 		}
 		defer a.Close()
 
+		mode := queryMode
+		if !cmd.Flags().Changed("mode") && a.Config.Search.DefaultMode != "" {
+			mode = a.Config.Search.DefaultMode
+		}
+
 		opts := search.SearchOpts{
 			Query:      q,
 			Collection: queryCollection,
 			TopK:       queryTopK,
 			Pool:       a.Config.Search.BM25TopK,
-			Mode:       queryMode,
+			Mode:       mode,
 			Explain:    queryExplain,
 			Since:      querySince,
 			Until:      queryUntil,
@@ -51,7 +56,7 @@ var queryCmd = &cobra.Command{
 		}
 
 		var results []search.Result
-		switch queryMode {
+		switch mode {
 		case "lexical":
 			results, err = a.BM25.Search(ctx, opts)
 		case "hybrid", "deep":
@@ -62,7 +67,7 @@ var queryCmd = &cobra.Command{
 				results, err = a.Hybrid.Search(ctx, opts)
 			}
 		default:
-			return fmt.Errorf("unknown mode %q: use lexical, hybrid, or deep", queryMode)
+			return fmt.Errorf("unknown mode %q: use lexical, hybrid, or deep", mode)
 		}
 		if err != nil {
 			return fmt.Errorf("query failed: %w", err)
@@ -75,7 +80,7 @@ var queryCmd = &cobra.Command{
 }
 
 func init() {
-	queryCmd.Flags().StringVar(&queryMode, "mode", "hybrid", "search mode: lexical or hybrid (deep is currently an alias for hybrid)")
+	queryCmd.Flags().StringVar(&queryMode, "mode", "hybrid", "search mode: lexical or hybrid (deep is an alias for hybrid); defaults to search.default_mode from config")
 	queryCmd.Flags().BoolVar(&queryExplain, "explain", false, "show scoring breakdown")
 	queryCmd.Flags().StringVarP(&queryCollection, "collection", "c", "", "limit to a specific collection")
 	queryCmd.Flags().IntVarP(&queryTopK, "limit", "n", 10, "number of results to return")
