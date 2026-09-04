@@ -147,58 +147,32 @@ embedding:
 
 ---
 
-### `providers.rerank`
-
-Parsed but currently unused: `--mode deep` runs the same path as `--mode hybrid` and no reranker is invoked. The schema is documented here because the config is accepted; the provider must expose `POST /v1/rerank` once reranking lands.
-
-```yaml
-providers:
-  rerank:
-    name: local-rerank
-    base_url: http://localhost:8080
-    model: bge-reranker-v2-m3
-```
-
-| Field | Description |
-|-------|-------------|
-| `name` | Identifier |
-| `base_url` | Base URL of the rerank server |
-| `model` | Model name passed in the request |
-
-Compatible servers include [infinity](https://github.com/michaelfeil/infinity) and similar reranking APIs.
-
----
-
 ## `search`
 
 Controls search behaviour and indexing parameters.
 
 ```yaml
 search:
-  default_mode: hybrid   # lexical | hybrid | deep
+  default_mode: hybrid   # lexical | hybrid (deep is an alias for hybrid)
   bm25_top_k: 50
   vector_top_k: 50
-  rerank_top_k: 10
   rrf_k: 60
   chunk_size: 512
-  chunk_overlap: 64
   prefer_extensions: [.md, .txt]   # optional — boost results with these extensions
   extension_boost: 2.0             # optional — multiplier for preferred extensions
 ```
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `default_mode` | `hybrid` | Search mode used when `--mode` is not passed. `lexical` = BM25 only; `hybrid` = BM25 + vector with RRF fusion; `deep` = hybrid then rerank |
-| `bm25_top_k` | `50` | Candidate count retrieved from BM25 before fusion |
-| `vector_top_k` | `50` | Candidate count retrieved from vector KNN before fusion |
-| `rerank_top_k` | `10` | Unused: no reranker is implemented |
+| `default_mode` | `hybrid` | Search mode used when `--mode` is not passed. `lexical` = BM25 only; `hybrid` = BM25 + vector with RRF fusion; `deep` = accepted as an alias of `hybrid` |
+| `bm25_top_k` | `50` | Candidate **documents** retrieved from BM25 before fusion (a document is represented by its best-matching chunk) |
+| `vector_top_k` | `50` | Candidate **documents** retrieved from vector KNN before fusion |
 | `rrf_k` | `60` | Reciprocal Rank Fusion constant; higher values reduce the influence of rank position |
-| `chunk_size` | `512` | Target chunk size in characters during indexing |
-| `chunk_overlap` | `64` | Reserved; not used by the current break-point chunker |
+| `chunk_size` | `512` | Target chunk size in characters during indexing. Must be positive; a value `≤ 0` is rejected at load time |
 | `prefer_extensions` | _(none)_ | File extensions whose result scores are multiplied by `extension_boost`, then re-sorted. Empty disables boosting |
 | `extension_boost` | `2.0` | Score multiplier applied to results matching `prefer_extensions`. Only used when `prefer_extensions` is set; values `≤ 0` fall back to `2.0` |
 
-`default_mode: hybrid` requires an embedding provider. `default_mode: deep` additionally requires a rerank provider. If the required provider is absent, qi falls back to `lexical` with a warning.
+`default_mode: hybrid` requires an embedding provider; if it is absent, qi falls back to `lexical` with a warning. An unknown `default_mode` is rejected at load time.
 
 ---
 

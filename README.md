@@ -102,7 +102,7 @@ qi doctor
 | `qi index [path\|collection]` | Index directory (current dir by default) or collection |
 | `qi search <query>` | BM25 full-text search |
 | `qi query <query>` | Hybrid search (BM25 + vector) |
-| `qi get <id>` | Retrieve document by 6-char hash ID |
+| `qi get <id>` | Retrieve document by 6-char hash ID (`--lines A:B`, `--max-bytes N`) |
 | `qi list` | List all collections |
 | `qi delete <collection>` | Delete a collection and all its indexed data |
 | `qi stats` | Show index statistics |
@@ -110,11 +110,11 @@ qi doctor
 
 ## Search Modes
 
-`qi query` supports three modes via `--mode`:
+`qi query` supports three modes via `--mode`, defaulting to `search.default_mode` from the config:
 
 - **`lexical`**: BM25 full-text search only
 - **`hybrid`** (default): BM25 + vector search fused with Reciprocal Rank Fusion (RRF)
-- **`deep`**: hybrid + optional reranking
+- **`deep`**: alias for `hybrid`
 
 Use `--explain` to see scoring breakdown:
 
@@ -165,7 +165,11 @@ Each document gets a short ID from the first 6 hex characters of its SHA-256 con
 
 ```sh
 qi get abc123
+qi get abc123 --lines 40:80      # 1-indexed, inclusive
+qi get abc123 --max-bytes 4096   # truncate long documents
 ```
+
+A prefix matching more than one document is an error listing the candidates.
 
 ## License
 
