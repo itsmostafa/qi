@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.1](https://github.com/itsmostafa/qi/compare/v0.14.0...v0.14.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ci:** honor draft release tag creation ([2caacf5](https://github.com/itsmostafa/qi/commit/2caacf525d01dd37a5d96406271917d4dbed3c92))
+* **ci:** honor draft release tag creation ([c84ba99](https://github.com/itsmostafa/qi/commit/c84ba993c04d0d35d88dfb80b9923e00b82a0f7e))
+
 ## [0.14.0](https://github.com/itsmostafa/qi/compare/v0.13.0...v0.14.0) (2026-09-04)
 
 
