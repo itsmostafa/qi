@@ -38,7 +38,7 @@ func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 	// frontmatter summary must not count as body text.
 	fromFrontmatter := len(sections)
 
-	var firstHeading string
+	var headings []string
 	var firstHeadingOrdinal int
 
 	flush := func() {
@@ -72,8 +72,11 @@ func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 					seg := v.Lines().At(0)
 					currentOrdinal = seg.Start
 				}
-				if firstHeading == "" {
-					firstHeading, firstHeadingOrdinal = headingText, currentOrdinal
+				if headingText != "" {
+					if len(headings) == 0 {
+						firstHeadingOrdinal = currentOrdinal
+					}
+					headings = append(headings, headingText)
 				}
 			}
 		case *ast.Paragraph, *ast.FencedCodeBlock, *ast.CodeBlock:
@@ -97,11 +100,15 @@ func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 
 	flush()
 	// A document that is nothing but headings would otherwise be stored active
-	// with zero chunks and be unfindable. Headings of documents that do have
-	// body text need no chunk of their own: they are already searchable through
-	// chunks_fts.heading_path.
-	if len(sections) == fromFrontmatter && firstHeading != "" {
-		sections = append(sections, Section{Text: firstHeading, Ordinal: firstHeadingOrdinal + offset})
+	// with zero chunks and be unfindable. Every heading goes in, not just the
+	// first: the deeper ones carry the words worth searching for. Headings of
+	// documents that do have body text need no chunk of their own — they are
+	// already searchable through chunks_fts.heading_path.
+	if len(sections) == fromFrontmatter && len(headings) > 0 {
+		sections = append(sections, Section{
+			Text:    strings.Join(headings, "\n"),
+			Ordinal: firstHeadingOrdinal + offset,
+		})
 	}
 	doc.Sections = sections
 	return doc, nil

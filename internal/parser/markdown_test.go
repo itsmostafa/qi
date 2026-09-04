@@ -235,11 +235,25 @@ func TestEmptyHeadingsGetNoChunkWhenTheDocumentHasBody(t *testing.T) {
 }
 
 // A document whose headings are all empty still needs one chunk, or it is
-// indexed active with nothing searchable.
-func TestAllEmptyHeadingsFallBackToTheFirstHeading(t *testing.T) {
-	doc := parseMD(t, "# A\n\n## B\n")
-	if len(doc.Sections) != 1 || doc.Sections[0].Text != "A" {
-		t.Fatalf("sections = %+v, want one section with text %q", doc.Sections, "A")
+// indexed active with nothing searchable — and that chunk must carry every
+// heading, not just the first, or `qi search Unicorn` misses the document whose
+// only distinguishing word is in a deeper heading.
+func TestHeadingOnlyDocumentIndexesEveryHeading(t *testing.T) {
+	doc := parseMD(t, "# Overview\n\n## Deployment Unicorn\n")
+	if len(doc.Sections) != 1 {
+		t.Fatalf("got %d sections, want 1: %+v", len(doc.Sections), doc.Sections)
+	}
+	if got := doc.Sections[0].Text; got != "Overview\nDeployment Unicorn" {
+		t.Errorf("Text = %q, want every heading", got)
+	}
+}
+
+// An empty heading contributes nothing to search, so it must not pad the
+// fallback chunk with blank lines.
+func TestHeadingFallbackSkipsEmptyHeadings(t *testing.T) {
+	doc := parseMD(t, "#\n\n## B\n")
+	if len(doc.Sections) != 1 || doc.Sections[0].Text != "B" {
+		t.Fatalf("sections = %+v, want one section with text %q", doc.Sections, "B")
 	}
 }
 
