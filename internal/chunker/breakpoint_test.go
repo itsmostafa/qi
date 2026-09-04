@@ -3,6 +3,7 @@ package chunker
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/itsmostafa/qi/internal/parser"
 )
@@ -106,5 +107,23 @@ func TestBreakpointChunker_PreservesHeadingPath(t *testing.T) {
 		if ch.HeadingPath != "Chapter > Section" {
 			t.Errorf("expected heading path preserved, got %q", ch.HeadingPath)
 		}
+	}
+}
+
+// A non-positive target size used to spin forever in the oversized-line split
+// loop (offset += TargetSize). The timeout is the assertion.
+func TestBreakpointChunker_NonPositiveTargetSize(t *testing.T) {
+	done := make(chan int, 1)
+	go func() {
+		doc := &parser.Document{Sections: []parser.Section{{Text: "hello world"}}}
+		done <- len(NewBreakpointChunker(0).Chunk(doc))
+	}()
+	select {
+	case n := <-done:
+		if n == 0 {
+			t.Error("expected at least one chunk")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Chunk hung with targetSize 0")
 	}
 }
