@@ -18,7 +18,9 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - name: Run Release Please
-        uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        # Requires release-please >=17.2.0 to honor force-tag-creation for drafts.
+        # Without the tag, PR generation replays already-released commits.
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
 
   build-binaries:
