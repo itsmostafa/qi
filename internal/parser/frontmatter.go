@@ -9,10 +9,12 @@ import (
 
 // Meta holds YAML frontmatter fields promoted to document level.
 type Meta struct {
-	Title       string     `yaml:"title"`
-	Description string     `yaml:"description"`
-	Timestamp   string     `yaml:"timestamp"`
-	Tags        stringList `yaml:"tags"`
+	Title       string `yaml:"title"`
+	Description string `yaml:"description"`
+	Timestamp   string `yaml:"timestamp"`
+	// Date is the documented alias for Timestamp; read it via Timestamp.
+	Date string     `yaml:"date"`
+	Tags stringList `yaml:"tags"`
 }
 
 // Summary renders the retrieval-worthy frontmatter as plain prose. It is empty
@@ -75,6 +77,9 @@ func splitFrontmatter(data []byte) (Meta, []byte, int) {
 			// put the raw block — keys, secrets and all — back into the chunk.
 			if err := yaml.Unmarshal(rest[:off], &meta); err != nil {
 				meta = Meta{}
+			}
+			if meta.Timestamp == "" {
+				meta.Timestamp = meta.Date
 			}
 			return meta, rest[next:], open + next
 		}

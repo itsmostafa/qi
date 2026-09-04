@@ -89,6 +89,23 @@ func TestFrontmatterTitleBeatsHeading(t *testing.T) {
 	}
 }
 
+// "date" is the documented alias for "timestamp"; without it these documents
+// index as undated and drop out of --since/--until and date sorting.
+func TestFrontmatterDateAliasesTimestamp(t *testing.T) {
+	doc := parseMD(t, "---\ntitle: T\ndate: 2026-07-17\n---\n\nBody.\n")
+	if doc.Meta.Timestamp != "2026-07-17" {
+		t.Errorf("Timestamp = %q, want 2026-07-17", doc.Meta.Timestamp)
+	}
+}
+
+// An explicit "timestamp" wins over "date".
+func TestFrontmatterTimestampBeatsDate(t *testing.T) {
+	doc := parseMD(t, "---\ntimestamp: 2026-01-02\ndate: 2026-07-17\n---\n\nBody.\n")
+	if doc.Meta.Timestamp != "2026-01-02" {
+		t.Errorf("Timestamp = %q, want 2026-01-02", doc.Meta.Timestamp)
+	}
+}
+
 func TestFrontmatterNeverReachesChunkBody(t *testing.T) {
 	got := bodyText(parseMD(t, withFrontmatter))
 	for _, leak := range []string{"resource:", "type:", "timestamp:", "tags:"} {
