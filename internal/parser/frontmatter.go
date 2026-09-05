@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bytes"
+	"cmp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -12,9 +13,11 @@ type Meta struct {
 	Title       string `yaml:"title"`
 	Description string `yaml:"description"`
 	Timestamp   string `yaml:"timestamp"`
-	// Date is the documented alias for Timestamp; read it via Timestamp.
-	Date string     `yaml:"date"`
-	Tags stringList `yaml:"tags"`
+	// Date and Created are documented aliases for Timestamp; read it via
+	// Timestamp.
+	Date    string     `yaml:"date"`
+	Created string     `yaml:"created"`
+	Tags    stringList `yaml:"tags"`
 }
 
 // Summary renders the retrieval-worthy frontmatter as plain prose. It is empty
@@ -79,7 +82,7 @@ func splitFrontmatter(data []byte) (Meta, []byte, int) {
 				meta = Meta{}
 			}
 			if meta.Timestamp == "" {
-				meta.Timestamp = meta.Date
+				meta.Timestamp = cmp.Or(meta.Date, meta.Created)
 			}
 			return meta, rest[next:], open + next
 		}
