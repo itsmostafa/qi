@@ -7,7 +7,7 @@
     {
       "name": "qi",
       "source": "./",
-      "description": "Local knowledge search CLI — index documents and search them using BM25 full-text search, vector embeddings, and LLM-powered Q&A, all running locally with no external dependencies.",
+      "description": "Local knowledge search CLI — index documents and search them using BM25 full-text search, vector embeddings, and hybrid RRF ranking, all running locally with no external dependencies.",
       "version": "0.1.0",
       "author": {
         "name": "itsmostafa"
@@ -18,7 +18,6 @@
       "keywords": [
         "search",
         "knowledge-base",
-        "rag",
         "bm25",
         "vector-search",
         "local-first",

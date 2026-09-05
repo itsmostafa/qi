@@ -1,6 +1,6 @@
 ---
 name: qi-cli
-description: Guide for using qi, a local knowledge search CLI for macOS and Linux. Use this skill whenever the user asks about qi commands, indexing documents, searching a knowledge base, configuring providers (Ollama, OpenAI), understanding search modes (BM25, hybrid, vector), or anything related to the qi tool. Triggers on phrases like "qi index", "qi search", "qi query", "how do I use qi", "set up qi", "configure qi", "search my notes with qi", or any mention of the qi CLI.
+description: Guide for using qi, a local knowledge search CLI for macOS and Linux. Use this skill when the user wants to index documents into a searchable knowledge base, search or retrieve from one, configure qi's collections or embedding providers (Ollama, OpenAI-compatible), choose between its search modes (BM25, hybrid, vector), or diagnose why qi search results look wrong — or on any mention of the qi CLI.
 ---
 
 qi is a local-first knowledge search CLI. It indexes documents into SQLite and supports BM25 full-text search and vector/hybrid search (with a local or remote embedding provider).
@@ -15,13 +15,6 @@ qi doctor                                 # Verify setup
 qi search "your query"                    # BM25 keyword search (no provider needed)
 qi query "your semantic question"         # Hybrid search (needs embedding provider)
 ```
-
----
-
-## Command selection guidance
-
-Prefer `qi index` when the task is about adding, refreshing, or organizing source material.
-Prefer `qi search` or `qi query` when the task is about finding relevant documents, passages, or citations.
 
 ---
 
@@ -128,7 +121,9 @@ These are per-command, not global.
 | `--until YYYY-MM-DD` | Only documents dated on or before this day |
 | `--sort date` | Newest first instead of by relevance |
 
-Dates come from the document's YAML frontmatter `timestamp:`. Documents without one are excluded by `--since`/`--until` and sort last under `--sort date`.
+Every document has a date. It comes from the frontmatter `timestamp:`, `date:`
+or `created:` when one of them parses, otherwise from the file's modification
+time — so no document is excluded from `--since`/`--until` for lack of a date.
 
 ---
 
