@@ -46,6 +46,10 @@ var defaultExtensions = map[string]bool{
 // config.Collection is the upgrade path if anyone needs a different cap.
 const maxFileSize = 10 << 20 // 10 MiB
 
+// dateLayout is the storage format of documents.doc_timestamp. The recency
+// filters compare it as a string, so it must stay lexicographically ordered.
+const dateLayout = "2006-01-02"
+
 // Stats summarises an index run.
 type Stats struct {
 	FilesScanned int
@@ -169,7 +173,10 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 		}
 		data, err := root.ReadFile(relPath)
 		if err == nil {
-			err = idx.indexFile(ctx, col, relPath, data, &stats)
+			var info fs.FileInfo
+			if info, err = d.Info(); err == nil {
+				err = idx.indexFile(ctx, col, relPath, data, info.ModTime(), &stats)
+			}
 		}
 		if err != nil {
 			err = fmt.Errorf("indexing %s: %w", relPath, err)
@@ -286,28 +293,61 @@ func (idx *Indexer) compact(ctx context.Context) error {
 	return nil
 }
 
-func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPath string, data []byte, stats *Stats) error {
+func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPath string, data []byte, modTime time.Time, stats *Stats) error {
 	hash := sha256sum(data)
 
 	// Check if document exists (active or deactivated) and whether content changed
 	var existingHash string
 	var docID int64
 	var existingActive int
+	var existingTime sql.NullString
 	row := idx.db.QueryRowContext(ctx,
-		`SELECT id, content_hash, active FROM documents WHERE collection=? AND path=?`,
+		`SELECT id, content_hash, active, doc_timestamp FROM documents WHERE collection=? AND path=?`,
 		col.Name, relPath)
-	if err := row.Scan(&docID, &existingHash, &existingActive); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := row.Scan(&docID, &existingHash, &existingActive, &existingTime); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("looking up existing document: %w", err)
 	}
 
 	if existingActive == 1 && existingHash == hash && !idx.Force {
-		return nil // unchanged
+		// Unchanged bytes still need their date rechecked. Two rows land here:
+		// one indexed before dates existed, holding a NULL that no --since or
+		// --until can ever match; and one whose date came from the mtime, which
+		// has since moved without the content changing (touch, cloud sync, git
+		// checkout), leaving the stored date disagreeing with the filesystem
+		// that defines the fallback. Both are fixed by re-deriving the date —
+		// no re-chunking, no re-embedding.
+		//
+		// The parse is the only way to tell a frontmatter date from a fallback
+		// one, so skip it when the current mtime already explains what is
+		// stored.
+		// ponytail: parses every frontmatter-dated file each run; export a
+		// frontmatter-only date reader from parser if index time starts to hurt.
+		if existingTime.Valid && existingTime.String == documentDate("", modTime) {
+			return nil // unchanged
+		}
+		doc, err := parser.For(strings.ToLower(filepath.Ext(relPath))).Parse(relPath, data)
+		if err != nil {
+			return fmt.Errorf("parsing: %w", err)
+		}
+		docDate := documentDate(doc.Meta.Timestamp, modTime)
+		if docDate == existingTime.String {
+			return nil // frontmatter still supplies the date; mtime is irrelevant
+		}
+		if _, err := idx.db.ExecContext(ctx,
+			`UPDATE documents SET doc_timestamp=? WHERE id=?`,
+			docDate, docID); err != nil {
+			return fmt.Errorf("updating document date: %w", err)
+		}
+		return nil
 	}
 
 	// Fast-path: previously deactivated document restored with byte-identical content.
 	// Reactivate the row without touching chunks or embeddings — deleting chunks would
 	// cascade into chunk_vectors/embeddings (migration 003) and force pointless re-embedding.
-	if docID != 0 && existingActive == 0 && existingHash == hash && !idx.Force {
+	// A row with no date is not fully indexed: reactivating it would restore a
+	// document that no date filter can ever match. Let it fall through and be
+	// rebuilt instead.
+	if docID != 0 && existingActive == 0 && existingHash == hash && existingTime.Valid && !idx.Force {
 		if _, err := idx.db.ExecContext(ctx,
 			`UPDATE documents SET active=1, updated_at=datetime('now') WHERE id=?`, docID); err != nil {
 			return fmt.Errorf("reactivating document: %w", err)
@@ -337,7 +377,7 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	if title == "" {
 		title = filepath.Base(relPath)
 	}
-	docTime := normalizeDate(doc.Meta.Timestamp)
+	docTime := documentDate(doc.Meta.Timestamp, modTime)
 	var tagsJSON any
 	if len(doc.Meta.Tags) > 0 {
 		if b, err := json.Marshal([]string(doc.Meta.Tags)); err == nil {
@@ -484,24 +524,38 @@ func (idx *Indexer) finishRun(ctx context.Context, runID int64, stats Stats, run
 	return err
 }
 
-// normalizeDate reduces a frontmatter date to YYYY-MM-DD. Anything else is
-// dropped rather than stored in a shape date filters cannot compare.
-func normalizeDate(s string) any {
+// documentDate is the document's date for recency filters: the frontmatter
+// date when there is a readable one, otherwise the file's modification time.
+// Without the fallback every undated document is NULL, and a NULL never
+// satisfies --since or --until, so the filters silently returned nothing on
+// corpora that do not use dated frontmatter. Local time, so an 11pm save is
+// not filed under tomorrow.
+func documentDate(frontmatter string, modTime time.Time) string {
+	if d := normalizeDate(frontmatter); d != "" {
+		return d
+	}
+	return modTime.Local().Format(dateLayout)
+}
+
+// normalizeDate reduces a frontmatter date to YYYY-MM-DD, or "" when there is
+// nothing parseable. Anything else is dropped rather than stored in a shape
+// date filters cannot compare.
+func normalizeDate(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return nil
+		return ""
 	}
-	for _, layout := range []string{"2006-01-02", time.RFC3339, "2006-01-02 15:04:05"} {
+	for _, layout := range []string{dateLayout, time.RFC3339, "2006-01-02 15:04:05"} {
 		if t, err := time.Parse(layout, s); err == nil {
-			return t.Format("2006-01-02")
+			return t.Format(dateLayout)
 		}
 	}
 	if len(s) >= 10 {
-		if t, err := time.Parse("2006-01-02", s[:10]); err == nil {
-			return t.Format("2006-01-02")
+		if t, err := time.Parse(dateLayout, s[:10]); err == nil {
+			return t.Format(dateLayout)
 		}
 	}
-	return nil
+	return ""
 }
 
 func sha256sum(data []byte) string {

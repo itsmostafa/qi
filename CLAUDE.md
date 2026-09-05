@@ -4,7 +4,28 @@ This file is the canonical guidance for AI coding agents working in this repo. `
 
 ## Project Overview
 
-qi is a local-first knowledge search CLI for macOS. It indexes documents (Markdown, plaintext) into a SQLite database and provides BM25 full-text search and vector search (with local embedding providers).
+qi is a local-first knowledge search CLI for macOS and Linux. It indexes documents (Markdown, plaintext) into a SQLite database and provides BM25 full-text search and vector search (with local embedding providers).
+
+## Working Style
+
+- Treat requests for action as instructions to complete the work. Do not stop at acknowledging the request, proposing a plan, or offering to continue.
+- Infer routine details from the request, repository context, and existing conventions. Make reasonable assumptions and persist until the intended outcome is complete.
+- Before asking a clarifying question, finish the work already authorized by context and make any remaining decision concrete and reviewable. Ask only when the answer could materially change the result.
+- Explicit user instructions take precedence over guidance in a skill. If a skill causes work to pause, remain unfinished, or diverge from the request, identify the exact skill instruction and explain how it applies.
+- Do not add unsolicited warnings, approval steps, or checklists for hypothetical risks.
+
+## Communication
+
+- State the outcome or main point early. Use concise paragraphs with one main idea each.
+- Prefer plain language and active voice. Include technical detail only when it helps the reader understand or verify the work.
+- Use lists for genuinely parallel or sequential information and avoid unnecessary nesting, tables, headings, and repeated summaries.
+- Avoid canned phrases, invented labels, and contrastive framing that introduces alternatives the user did not ask about.
+
+## Delegation
+
+- When the runtime and user instructions allow subagents, delegate independent work that can run in parallel and would materially save time or improve quality.
+- Keep small or tightly coupled changes with one agent. Give delegated tasks clear boundaries, review their results, and integrate them into one coherent answer.
+- Write inter-agent messages clearly because a person may read them.
 
 ## Build
 
@@ -16,7 +37,10 @@ go vet ./...        # Lint
 
 ## Checks
 
-Always run `task check` before finishing any code change to ensure all checks pass (build, tests, vet).
+- Always run `task check` before finishing a code change. Use focused tests while iterating, then run the required check once the implementation is ready.
+- Do not add tests for a reversible, low-impact change when they would only mirror the implementation. Tests should verify meaningful behavior or guard against a plausible regression.
+- After the required checks pass, broaden or repeat them only when another change, a failure, or an unresolved concern justifies it.
+- Documentation-only edits do not require the full Go test suite unless they change executable examples, generated artifacts, or documented command behavior.
 
 ## Key Design Decisions
 
@@ -26,8 +50,9 @@ Always run `task check` before finishing any code change to ensure all checks pa
 - **Break-point chunker**: Scores chunk boundaries by type (heading=100, code fence=80, blank line=20) with distance decay from target size.
 - **Graceful degradation**: Vector search is optional — BM25 always works.
 - **Auto-generated collection names**: A collection is named after its own directory (`~/Projects/tools/qi` → `qi`). Colliding names absorb leading path segments until unique (`work-notes`, `personal-notes`). The `--name` flag was removed from `index`. Legacy names are normalized on startup and indexed rows migrate via `RenameCollectionData`.
+- **Every document has a date**: `doc_timestamp` falls back to the file's mtime when frontmatter carries no readable date (`internal/indexer.documentDate`). Without it, undated documents were NULL, and NULL satisfies neither `--since` nor `--until`, so the recency filters returned nothing on corpora that don't use dated frontmatter. A plain `qi index` backfills NULL rows and re-derives a fallback date whose mtime has moved (touch, cloud sync, `git checkout`), both without re-chunking or re-embedding; an explicit frontmatter date never follows the mtime.
 - **Query relaxation**: BM25 search automatically falls back from conjunctive to disjunctive matching for natural-language queries that return zero results.
-- **Frontmatter is document metadata, not body text**: `internal/parser/frontmatter.go` strips YAML frontmatter before goldmark parses. `title`, `timestamp`/`date` and `tags` become document-level fields; the useful ones are re-emitted as one leading section of plain prose so they stay searchable.
+- **Frontmatter is document metadata, not body text**: `internal/parser/frontmatter.go` strips YAML frontmatter before goldmark parses. `title`, `timestamp`/`date`/`created` and `tags` become document-level fields; the useful ones are re-emitted as one leading section of plain prose so they stay searchable.
 - **One result per document**: both retrievers keep only a document's best-ranked chunk — BM25 stops at `poolSize` *distinct documents* rather than applying a SQL `LIMIT` to chunks, and the vector KNN dedupes before truncating — and `ReciprocalRankFusion` keys on document ID, counting each document once at its best rank. Bounding the pool by chunks let one verbose file starve every other match.
 - **Post-retrieval pass**: `search.Finalize` (`internal/search/postprocess.go`) applies date sort, duplicate-snippet collapse and a backstop one-per-document pass over the whole candidate pool, then truncates to the caller's limit. Retrievers no longer truncate; commands call `Finalize`.
 - **Compaction on index**: every `qi index` hard-deletes deactivated documents, prunes orphaned content blobs, runs FTS5 `optimize`, and `VACUUM`s when the freelist exceeds a quarter of the file. A restored file therefore re-chunks and re-embeds rather than reactivating.
@@ -43,7 +68,7 @@ internal/
   app/                Wires config + db + services
   config/             Config loading, defaults, path expansion
   db/                 SQLite open/migrate/WAL, embedding blob storage
-    migrations/       Embedded SQL migrations (001_init.sql … 006_document_metadata.sql)
+    migrations/       Embedded SQL migrations, applied in filename order
   chunker/            Break-point chunker (chunker.Chunker interface)
   indexer/            Filesystem walker, SHA-256 change detection, embedder
   output/             Text/JSON formatters
@@ -65,7 +90,7 @@ Tests use real in-memory SQLite (no mocking). Provider tests use `httptest.NewSe
 
 ## Adding a New Migration
 
-Add `internal/db/migrations/00N_description.sql` — the runner applies them in alphabetical order and skips versions already recorded in `schema_version`. Current migrations: `001_init.sql` … `006_document_metadata.sql`. An `ALTER TABLE ... ADD COLUMN` migration must also register one added column in `addedColumns` (`migrate.go`), since SQLite has no `IF NOT EXISTS` for it.
+Add `internal/db/migrations/00N_description.sql` — the runner applies them in alphabetical order and skips versions already recorded in `schema_version`. An `ALTER TABLE ... ADD COLUMN` migration must also register one added column in `addedColumns` (`migrate.go`), since SQLite has no `IF NOT EXISTS` for it.
 
 ## sqlite-vec Note
 
