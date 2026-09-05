@@ -6,6 +6,27 @@ This file is the canonical guidance for AI coding agents working in this repo. `
 
 qi is a local-first knowledge search CLI for macOS and Linux. It indexes documents (Markdown, plaintext) into a SQLite database and provides BM25 full-text search and vector search (with local embedding providers).
 
+## Working Style
+
+- Treat requests for action as instructions to complete the work. Do not stop at acknowledging the request, proposing a plan, or offering to continue.
+- Infer routine details from the request, repository context, and existing conventions. Make reasonable assumptions and persist until the intended outcome is complete.
+- Before asking a clarifying question, finish the work already authorized by context and make any remaining decision concrete and reviewable. Ask only when the answer could materially change the result.
+- Explicit user instructions take precedence over guidance in a skill. If a skill causes work to pause, remain unfinished, or diverge from the request, identify the exact skill instruction and explain how it applies.
+- Do not add unsolicited warnings, approval steps, or checklists for hypothetical risks.
+
+## Communication
+
+- State the outcome or main point early. Use concise paragraphs with one main idea each.
+- Prefer plain language and active voice. Include technical detail only when it helps the reader understand or verify the work.
+- Use lists for genuinely parallel or sequential information and avoid unnecessary nesting, tables, headings, and repeated summaries.
+- Avoid canned phrases, invented labels, and contrastive framing that introduces alternatives the user did not ask about.
+
+## Delegation
+
+- When the runtime and user instructions allow subagents, delegate independent work that can run in parallel and would materially save time or improve quality.
+- Keep small or tightly coupled changes with one agent. Give delegated tasks clear boundaries, review their results, and integrate them into one coherent answer.
+- Write inter-agent messages clearly because a person may read them.
+
 ## Build
 
 ```sh
@@ -16,7 +37,10 @@ go vet ./...        # Lint
 
 ## Checks
 
-Always run `task check` before finishing any code change to ensure all checks pass (build, tests, vet).
+- Always run `task check` before finishing a code change. Use focused tests while iterating, then run the required check once the implementation is ready.
+- Do not add tests for a reversible, low-impact change when they would only mirror the implementation. Tests should verify meaningful behavior or guard against a plausible regression.
+- After the required checks pass, broaden or repeat them only when another change, a failure, or an unresolved concern justifies it.
+- Documentation-only edits do not require the full Go test suite unless they change executable examples, generated artifacts, or documented command behavior.
 
 ## Key Design Decisions
 
