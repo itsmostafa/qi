@@ -4,7 +4,7 @@ This file is the canonical guidance for AI coding agents working in this repo. `
 
 ## Project Overview
 
-qi is a local-first knowledge search CLI for macOS. It indexes documents (Markdown, plaintext) into a SQLite database and provides BM25 full-text search and vector search (with local embedding providers).
+qi is a local-first knowledge search CLI for macOS and Linux. It indexes documents (Markdown, plaintext) into a SQLite database and provides BM25 full-text search and vector search (with local embedding providers).
 
 ## Build
 
@@ -26,7 +26,7 @@ Always run `task check` before finishing any code change to ensure all checks pa
 - **Break-point chunker**: Scores chunk boundaries by type (heading=100, code fence=80, blank line=20) with distance decay from target size.
 - **Graceful degradation**: Vector search is optional — BM25 always works.
 - **Auto-generated collection names**: A collection is named after its own directory (`~/Projects/tools/qi` → `qi`). Colliding names absorb leading path segments until unique (`work-notes`, `personal-notes`). The `--name` flag was removed from `index`. Legacy names are normalized on startup and indexed rows migrate via `RenameCollectionData`.
-- **Every document has a date**: `doc_timestamp` falls back to the file's mtime when frontmatter carries no readable date (`internal/indexer.documentDate`). Without it, undated documents were NULL, and NULL satisfies neither `--since` nor `--until`, so the recency filters returned nothing on corpora that don't use dated frontmatter. A plain `qi index` backfills NULL rows without re-chunking or re-embedding.
+- **Every document has a date**: `doc_timestamp` falls back to the file's mtime when frontmatter carries no readable date (`internal/indexer.documentDate`). Without it, undated documents were NULL, and NULL satisfies neither `--since` nor `--until`, so the recency filters returned nothing on corpora that don't use dated frontmatter. A plain `qi index` backfills NULL rows and re-derives a fallback date whose mtime has moved (touch, cloud sync, `git checkout`), both without re-chunking or re-embedding; an explicit frontmatter date never follows the mtime.
 - **Query relaxation**: BM25 search automatically falls back from conjunctive to disjunctive matching for natural-language queries that return zero results.
 - **Frontmatter is document metadata, not body text**: `internal/parser/frontmatter.go` strips YAML frontmatter before goldmark parses. `title`, `timestamp`/`date`/`created` and `tags` become document-level fields; the useful ones are re-emitted as one leading section of plain prose so they stay searchable.
 - **One result per document**: both retrievers keep only a document's best-ranked chunk — BM25 stops at `poolSize` *distinct documents* rather than applying a SQL `LIMIT` to chunks, and the vector KNN dedupes before truncating — and `ReciprocalRankFusion` keys on document ID, counting each document once at its best rank. Bounding the pool by chunks let one verbose file starve every other match.
@@ -44,7 +44,7 @@ internal/
   app/                Wires config + db + services
   config/             Config loading, defaults, path expansion
   db/                 SQLite open/migrate/WAL, embedding blob storage
-    migrations/       Embedded SQL migrations (001_init.sql … 006_document_metadata.sql)
+    migrations/       Embedded SQL migrations, applied in filename order
   chunker/            Break-point chunker (chunker.Chunker interface)
   indexer/            Filesystem walker, SHA-256 change detection, embedder
   output/             Text/JSON formatters
@@ -66,7 +66,7 @@ Tests use real in-memory SQLite (no mocking). Provider tests use `httptest.NewSe
 
 ## Adding a New Migration
 
-Add `internal/db/migrations/00N_description.sql` — the runner applies them in alphabetical order and skips versions already recorded in `schema_version`. Current migrations: `001_init.sql` … `006_document_metadata.sql`. An `ALTER TABLE ... ADD COLUMN` migration must also register one added column in `addedColumns` (`migrate.go`), since SQLite has no `IF NOT EXISTS` for it.
+Add `internal/db/migrations/00N_description.sql` — the runner applies them in alphabetical order and skips versions already recorded in `schema_version`. An `ALTER TABLE ... ADD COLUMN` migration must also register one added column in `addedColumns` (`migrate.go`), since SQLite has no `IF NOT EXISTS` for it.
 
 ## sqlite-vec Note
 

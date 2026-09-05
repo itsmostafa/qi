@@ -120,3 +120,58 @@ func TestIndexer_DoesNotReactivateDatelessDocument(t *testing.T) {
 		t.Error("restored document still has no date")
 	}
 }
+
+// A fallback date is the file's mtime, so it has to follow the mtime. When an
+// undated file is touched, synced or checked out its bytes stay identical, and
+// the unchanged fast-path would otherwise keep the old date forever — leaving
+// --since, --until and --sort date disagreeing with the filesystem. An explicit
+// frontmatter date outranks the mtime and must not move with it.
+func TestIndexer_RefreshesFallbackDateWhenMtimeMoves(t *testing.T) {
+	database := openTestDB(t)
+	idx := New(database, 256)
+	col := makeTestCollection(t, map[string]string{
+		"plain.md": "# Plain\nNo frontmatter.",
+		"dated.md": "---\ndate: 2026-03-02\n---\n\nBody.",
+	})
+
+	touch := func(when time.Time) {
+		t.Helper()
+		for _, name := range []string{"plain.md", "dated.md"} {
+			if err := os.Chtimes(filepath.Join(col.Path, name), when, when); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	touch(time.Date(2026, 5, 4, 12, 0, 0, 0, time.Local))
+	if _, err := idx.Index(context.Background(), col); err != nil {
+		t.Fatalf("Index failed: %v", err)
+	}
+
+	touch(time.Date(2026, 9, 1, 9, 0, 0, 0, time.Local))
+	stats, err := idx.Index(context.Background(), col)
+	if err != nil {
+		t.Fatalf("reindex failed: %v", err)
+	}
+	// Refreshing a date is a metadata write: it must not report the corpus as
+	// rewritten, nor re-chunk and re-embed it.
+	if stats.FilesAdded != 0 || stats.FilesUpdated != 0 {
+		t.Errorf("date refresh rewrote documents: added=%d updated=%d, want 0 and 0",
+			stats.FilesAdded, stats.FilesUpdated)
+	}
+
+	want := map[string]string{
+		"plain.md": "2026-09-01",
+		"dated.md": "2026-03-02",
+	}
+	for path, expect := range want {
+		var got string
+		if err := database.QueryRowContext(context.Background(),
+			`SELECT COALESCE(doc_timestamp,'') FROM documents WHERE path=?`, path).Scan(&got); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if got != expect {
+			t.Errorf("%s: doc_timestamp = %q, want %q", path, got, expect)
+		}
+	}
+}

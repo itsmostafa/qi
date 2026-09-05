@@ -309,21 +309,34 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	}
 
 	if existingActive == 1 && existingHash == hash && !idx.Force {
-		if existingTime.Valid {
+		// Unchanged bytes still need their date rechecked. Two rows land here:
+		// one indexed before dates existed, holding a NULL that no --since or
+		// --until can ever match; and one whose date came from the mtime, which
+		// has since moved without the content changing (touch, cloud sync, git
+		// checkout), leaving the stored date disagreeing with the filesystem
+		// that defines the fallback. Both are fixed by re-deriving the date —
+		// no re-chunking, no re-embedding.
+		//
+		// The parse is the only way to tell a frontmatter date from a fallback
+		// one, so skip it when the current mtime already explains what is
+		// stored.
+		// ponytail: parses every frontmatter-dated file each run; export a
+		// frontmatter-only date reader from parser if index time starts to hurt.
+		if existingTime.Valid && existingTime.String == documentDate("", modTime) {
 			return nil // unchanged
 		}
-		// Rows indexed before dates existed have a NULL timestamp and are
-		// invisible to --since/--until forever, since unchanged content never
-		// reaches the write path below. Backfill without re-chunking or
-		// re-embedding: parsing costs one pass, and only until it succeeds.
 		doc, err := parser.For(strings.ToLower(filepath.Ext(relPath))).Parse(relPath, data)
 		if err != nil {
 			return fmt.Errorf("parsing: %w", err)
 		}
+		docDate := documentDate(doc.Meta.Timestamp, modTime)
+		if docDate == existingTime.String {
+			return nil // frontmatter still supplies the date; mtime is irrelevant
+		}
 		if _, err := idx.db.ExecContext(ctx,
 			`UPDATE documents SET doc_timestamp=? WHERE id=?`,
-			documentDate(doc.Meta.Timestamp, modTime), docID); err != nil {
-			return fmt.Errorf("backfilling document date: %w", err)
+			docDate, docID); err != nil {
+			return fmt.Errorf("updating document date: %w", err)
 		}
 		return nil
 	}
