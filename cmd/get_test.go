@@ -63,7 +63,7 @@ func TestGetAmbiguousPrefixErrors(t *testing.T) {
 	if strings.Contains(out, "one") || strings.Contains(out, "two") {
 		t.Errorf("ambiguous prefix printed document bodies:\n%s", out)
 	}
-	for _, want := range []string{"ambiguous", "abc123aaaa", "abc123bbbb", "qi://test/a.md"} {
+	for _, want := range []string{"ambiguous", "abc123aaaa", "abc123bbbb"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error missing %q: %v", want, err)
 		}
@@ -103,6 +103,47 @@ func TestGetLineRangeAndMaxBytes(t *testing.T) {
 	}
 	if doc.Body != "l1" || !doc.Truncated || doc.Hash != "def456cccc" {
 		t.Errorf("unexpected JSON document: %+v", doc)
+	}
+}
+
+func TestGetRejectsInvalidHashPrefixes(t *testing.T) {
+	withIndexTestConfig(t, makeGetTestConfig(t))
+	withGetFlags(t, "", 0, "text")
+	for _, id := range []string{"", "%", "abc_", strings.Repeat("a", 65), "not-a-hash"} {
+		if err := getCmd.RunE(getCmd, []string{id}); err == nil {
+			t.Errorf("invalid ID prefix %q should be rejected", id)
+		}
+	}
+}
+
+func TestGetDetectsAmbiguityBeyondDuplicatePathLimit(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "qi.db")
+	database, err := db.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO content(hash, body) VALUES ('abc123aaaa', 'one'), ('abc123bbbb', 'two');
+		INSERT INTO documents(collection, path, title, content_hash)
+		VALUES
+			('test', 'a-01.md', 'A', 'abc123aaaa'), ('test', 'a-02.md', 'A', 'abc123aaaa'),
+			('test', 'a-03.md', 'A', 'abc123aaaa'), ('test', 'a-04.md', 'A', 'abc123aaaa'),
+			('test', 'a-05.md', 'A', 'abc123aaaa'), ('test', 'a-06.md', 'A', 'abc123aaaa'),
+			('test', 'a-07.md', 'A', 'abc123aaaa'), ('test', 'a-08.md', 'A', 'abc123aaaa'),
+			('test', 'a-09.md', 'A', 'abc123aaaa'), ('test', 'a-10.md', 'A', 'abc123aaaa'),
+			('test', 'b.md', 'B', 'abc123bbbb');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	withIndexTestConfig(t, writeIndexTestConfig(t, fmt.Sprintf("database_path: %s\n", dbPath)))
+	withGetFlags(t, "", 0, "text")
+	if err := getCmd.RunE(getCmd, []string{"abc123"}); err == nil ||
+		!strings.Contains(err.Error(), "abc123bbbb") {
+		t.Fatalf("prefix hidden beyond duplicate paths: %v", err)
 	}
 }
 
