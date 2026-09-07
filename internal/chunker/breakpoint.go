@@ -3,12 +3,12 @@ package chunker
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/itsmostafa/qi/internal/parser"
 )
 
 // breakpointScores assigns a score to each position that could start a new chunk.
-// Higher scores = stronger break points.
 const (
 	scoreHeading   = 100
 	scoreCodeFence = 80
@@ -21,31 +21,23 @@ type BreakpointChunker struct {
 	MinSize    int // minimum chunk size before emitting
 }
 
-// defaultTargetSize is used when a non-positive target size is given. A
-// non-positive size makes the oversized-line split loop (offset += TargetSize)
-// spin forever, so it is never accepted.
 const defaultTargetSize = 512
 
 func NewBreakpointChunker(targetSize int) *BreakpointChunker {
 	if targetSize <= 0 {
 		targetSize = defaultTargetSize
 	}
-	return &BreakpointChunker{
-		TargetSize: targetSize,
-		MinSize:    targetSize / 4,
-	}
+	return &BreakpointChunker{TargetSize: targetSize, MinSize: targetSize / 4}
 }
 
 func (c *BreakpointChunker) Chunk(doc *parser.Document) []Chunk {
 	var chunks []Chunk
 	seq := 0
-
 	for _, section := range doc.Sections {
 		sectionChunks := c.chunkSection(section, seq)
 		chunks = append(chunks, sectionChunks...)
 		seq += len(sectionChunks)
 	}
-
 	return chunks
 }
 
@@ -54,13 +46,18 @@ func (c *BreakpointChunker) chunkSection(section parser.Section, startSeq int) [
 	if len(lines) == 0 {
 		return nil
 	}
-
-	type breakPoint struct {
-		lineIdx int
-		score   int
+	lineStarts := make([]int, len(lines))
+	for i := 1; i < len(lines); i++ {
+		lineStarts[i] = lineStarts[i-1] + len(lines[i-1]) + 1
+	}
+	makeChunk := func(text string, seq, byteStart int) Chunk {
+		ch := Chunk{Seq: seq, Text: text, HeadingPath: section.HeadingPath, Ordinal: section.Ordinal}
+		if span, ok := parser.SourceRange(section.SourceMap, byteStart, byteStart+len(text)); ok {
+			ch.Ordinal, ch.StartLine, ch.EndLine = span.Start, span.StartLine, span.EndLine
+		}
+		return ch
 	}
 
-	// Score each line boundary
 	scores := make([]int, len(lines))
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -78,62 +75,43 @@ func (c *BreakpointChunker) chunkSection(section parser.Section, startSeq int) [
 	seq := startSeq
 	start := 0
 	size := 0
-
 	for i, line := range lines {
 		lineLen := runeLen(line)
-
-		// Force-split lines that individually exceed target size (e.g. minified files).
 		if lineLen > c.TargetSize {
 			if i > start {
-				text := strings.Join(lines[start:i], "\n")
-				text = strings.TrimRightFunc(text, unicode.IsSpace)
+				text := strings.TrimRightFunc(strings.Join(lines[start:i], "\n"), unicode.IsSpace)
 				if text != "" {
-					chunks = append(chunks, Chunk{
-						Seq: seq, Text: text,
-						HeadingPath: section.HeadingPath, Ordinal: section.Ordinal,
-					})
+					chunks = append(chunks, makeChunk(text, seq, lineStarts[start]))
 					seq++
 				}
 			}
-			runes := []rune(line)
-			for offset := 0; offset < len(runes); offset += c.TargetSize {
-				end := offset + c.TargetSize
-				if end > len(runes) {
-					end = len(runes)
+			byteStart, count := 0, 0
+			for byteEnd := range line {
+				if count == c.TargetSize {
+					chunks = append(chunks, makeChunk(line[byteStart:byteEnd], seq, lineStarts[i]+byteStart))
+					seq++
+					byteStart, count = byteEnd, 0
 				}
-				chunks = append(chunks, Chunk{
-					Seq: seq, Text: string(runes[offset:end]),
-					HeadingPath: section.HeadingPath, Ordinal: section.Ordinal,
-				})
-				seq++
+				count++
 			}
+			chunks = append(chunks, makeChunk(line[byteStart:], seq, lineStarts[i]+byteStart))
+			seq++
 			start = i + 1
 			size = 0
 			continue
 		}
 
-		size += lineLen + 1 // +1 for newline
-
+		size += lineLen + 1
 		if size < c.MinSize {
 			continue
 		}
-
-		// Apply distance decay: score decreases as we move away from target
 		if size >= c.TargetSize || (scores[i] > 0 && size >= c.MinSize) {
 			decay := distanceDecay(size, c.TargetSize)
 			effectiveScore := float64(scores[i]) * decay
-
-			// Emit chunk when we hit target size OR have a strong breakpoint
 			if size >= c.TargetSize || effectiveScore >= float64(scoreBlankLine) {
-				text := strings.Join(lines[start:i+1], "\n")
-				text = strings.TrimRightFunc(text, unicode.IsSpace)
+				text := strings.TrimRightFunc(strings.Join(lines[start:i+1], "\n"), unicode.IsSpace)
 				if text != "" {
-					chunks = append(chunks, Chunk{
-						Seq:         seq,
-						Text:        text,
-						HeadingPath: section.HeadingPath,
-						Ordinal:     section.Ordinal,
-					})
+					chunks = append(chunks, makeChunk(text, seq, lineStarts[start]))
 					seq++
 				}
 				start = i + 1
@@ -142,29 +120,17 @@ func (c *BreakpointChunker) chunkSection(section parser.Section, startSeq int) [
 		}
 	}
 
-	// Remaining text
 	if start < len(lines) {
-		text := strings.Join(lines[start:], "\n")
-		text = strings.TrimRightFunc(text, unicode.IsSpace)
+		text := strings.TrimRightFunc(strings.Join(lines[start:], "\n"), unicode.IsSpace)
 		if text != "" {
-			chunks = append(chunks, Chunk{
-				Seq:         seq,
-				Text:        text,
-				HeadingPath: section.HeadingPath,
-				Ordinal:     section.Ordinal,
-			})
+			chunks = append(chunks, makeChunk(text, seq, lineStarts[start]))
 		}
 	}
-
 	return chunks
 }
 
-func runeLen(s string) int {
-	return len([]rune(s))
-}
+func runeLen(s string) int { return utf8.RuneCountInString(s) }
 
-// distanceDecay returns a multiplier [0, 1] based on how far size is from target.
-// At target: 1.0. Decays linearly.
 func distanceDecay(size, target int) float64 {
 	if target <= 0 {
 		return 1.0

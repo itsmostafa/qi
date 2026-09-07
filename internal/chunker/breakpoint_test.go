@@ -127,3 +127,104 @@ func TestBreakpointChunker_NonPositiveTargetSize(t *testing.T) {
 		t.Fatal("Chunk hung with targetSize 0")
 	}
 }
+
+func TestBreakpointChunkerCitesEachMappedChunk(t *testing.T) {
+	src := "# Heading\n\nfirst café\n\nsecond passage\n\n## Later\n\nthird text\n"
+	doc, err := parser.For(".md").Parse("note.md", []byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	chunks := NewBreakpointChunker(10).Chunk(doc)
+	if len(chunks) < 2 {
+		t.Fatalf("got %d chunks, want several", len(chunks))
+	}
+	for _, ch := range chunks {
+		if ch.StartLine < 1 || ch.EndLine < ch.StartLine {
+			t.Errorf("invalid citation range %+v", ch)
+		}
+		if ch.Ordinal < 0 || ch.Ordinal >= len(src) {
+			t.Errorf("invalid raw ordinal %+v", ch)
+		}
+	}
+	if chunks[0].Ordinal == chunks[len(chunks)-1].Ordinal {
+		t.Errorf("all chunks point at one source location: %+v", chunks)
+	}
+}
+
+func TestBreakpointChunkerNarrowsFlattenedMarkdownLines(t *testing.T) {
+	src := "# Heading\n\nαααααααα\nββββββββ\n"
+	doc, err := parser.For(".md").Parse("note.md", []byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	chunks := NewBreakpointChunker(8).Chunk(doc)
+	if len(chunks) < 2 {
+		t.Fatalf("got %d chunks, want flattened paragraph split", len(chunks))
+	}
+	if chunks[0].StartLine != 3 || chunks[len(chunks)-1].EndLine != 4 {
+		t.Errorf("flattened paragraph citations = %+v, want lines 3 through 4", chunks)
+	}
+	if chunks[0].Ordinal >= chunks[len(chunks)-1].Ordinal {
+		t.Errorf("flattened chunks did not narrow raw ordinal: %+v", chunks)
+	}
+	// A split after the synthetic soft-break space must not cite the next line.
+	chunks = NewBreakpointChunker(9).Chunk(doc)
+	if len(chunks) != 2 || chunks[0].EndLine != 3 || chunks[1].StartLine != 4 {
+		t.Errorf("soft-break boundary widened source ranges: %+v", chunks)
+	}
+}
+
+func TestBreakpointChunkerCitesLaterCodeChunksPrecisely(t *testing.T) {
+	src := "# Code\n\n```\nline-one\nline-two\nline-333\n```\n"
+	doc, err := parser.For(".md").Parse("note.md", []byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	chunks := NewBreakpointChunker(8).Chunk(doc)
+	if len(chunks) != 3 {
+		t.Fatalf("got %d code chunks, want 3: %+v", len(chunks), chunks)
+	}
+	for i, wantLine := range []int{4, 5, 6} {
+		if chunks[i].StartLine != wantLine || chunks[i].EndLine != wantLine {
+			t.Errorf("chunk %d range = %d-%d, want %d-%d", i, chunks[i].StartLine, chunks[i].EndLine, wantLine, wantLine)
+		}
+	}
+	if chunks[1].Ordinal <= chunks[0].Ordinal || chunks[2].Ordinal <= chunks[1].Ordinal {
+		t.Errorf("code chunk ordinals are not source ordered: %+v", chunks)
+	}
+}
+
+func TestTrimmedCodeChunksKeepExactRawOrdinals(t *testing.T) {
+	src := "# Code\n\n```\n  ééééé  \n```\n"
+	doc, err := parser.For(".md").Parse("note.md", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks := NewBreakpointChunker(2).Chunk(doc)
+	if len(chunks) != 3 {
+		t.Fatalf("got %d chunks, want 3: %+v", len(chunks), chunks)
+	}
+	for i, ch := range chunks {
+		want := strings.Index(src, "é") + i*4
+		if ch.Ordinal != want || ch.StartLine != 4 || ch.EndLine != 4 {
+			t.Errorf("chunk %d = %+v, want byte %d on line 4", i, ch, want)
+		}
+	}
+}
+
+func TestBreakpointChunkerUnicodeOrdinalUsesRawBytes(t *testing.T) {
+	src := "ééééé\n"
+	doc, err := parser.For(".txt").Parse("note.txt", []byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	chunks := NewBreakpointChunker(2).Chunk(doc)
+	if len(chunks) != 3 {
+		t.Fatalf("got %d chunks, want 3", len(chunks))
+	}
+	for i, want := range []int{0, 4, 8} {
+		if chunks[i].Ordinal != want || chunks[i].StartLine != 1 || chunks[i].EndLine != 1 {
+			t.Errorf("chunk %d citation = %+v, want ordinal %d on line 1", i, chunks[i], want)
+		}
+	}
+}
