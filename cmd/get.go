@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/itsmostafa/qi/internal/app"
+	"github.com/itsmostafa/qi/internal/search"
 	"github.com/spf13/cobra"
 )
 
@@ -21,6 +22,7 @@ var (
 type candidate struct {
 	Collection string `json:"collection"`
 	Path       string `json:"path"`
+	SourceURI  string `json:"source_uri"`
 	Title      string `json:"title"`
 	Hash       string `json:"hash"`
 	Body       string `json:"body"`
@@ -30,15 +32,16 @@ type candidate struct {
 	AlsoAt []string `json:"also_at,omitempty"`
 }
 
-// sharedHash reports whether every match is the same content under different
-// paths, which no longer prefix can tell apart.
-func sharedHash(matches []candidate) bool {
-	for _, m := range matches[1:] {
-		if m.Hash != matches[0].Hash {
-			return false
+func validateHashPrefix(id string) (string, error) {
+	if id == "" || len(id) > 64 {
+		return "", fmt.Errorf("ID prefix must contain 1 to 64 hexadecimal characters, got %q", id)
+	}
+	for _, r := range id {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return "", fmt.Errorf("ID prefix must contain only hexadecimal characters, got %q", id)
 		}
 	}
-	return true
+	return strings.ToLower(id), nil
 }
 
 var getCmd = &cobra.Command{
@@ -46,7 +49,13 @@ var getCmd = &cobra.Command{
 	Short: "Retrieve a document by ID (hash prefix)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
+		id, err := validateHashPrefix(args[0])
+		if err != nil {
+			return err
+		}
+		if getMaxBytes < 0 {
+			return fmt.Errorf("--max-bytes must not be negative, got %d", getMaxBytes)
+		}
 		ctx := context.Background()
 		a, err := app.New(ctx, cfgFile)
 		if err != nil {
@@ -54,17 +63,56 @@ var getCmd = &cobra.Command{
 		}
 		defer a.Close()
 
-		// Match by content hash prefix. LIMIT bounds an over-short prefix.
-		// ponytail: past 10 documents sharing one hash the "also at" list is
-		// truncated; page it if anyone ever hits that.
+		// First identify distinct hashes. Looking at only the first ten paths can
+		// hide a second hash when many documents share one content blob.
+		hashRows, err := a.DB.QueryContext(ctx, `
+			SELECT DISTINCT d.content_hash
+			FROM documents d
+			WHERE d.content_hash LIKE ? AND d.active = 1
+			ORDER BY d.content_hash
+			LIMIT 2
+		`, id+"%")
+		if err != nil {
+			return fmt.Errorf("querying document: %w", err)
+		}
+		var hashes []string
+		for hashRows.Next() {
+			var hash string
+			if err := hashRows.Scan(&hash); err != nil {
+				hashRows.Close()
+				return fmt.Errorf("reading document hash: %w", err)
+			}
+			hashes = append(hashes, hash)
+		}
+		if err := hashRows.Err(); err != nil {
+			hashRows.Close()
+			return fmt.Errorf("reading document hashes: %w", err)
+		}
+		hashRows.Close()
+		switch len(hashes) {
+		case 0:
+			return fmt.Errorf("no document found with ID prefix %q", id)
+		case 2:
+			var b strings.Builder
+			fmt.Fprintf(&b, "ID prefix %q is ambiguous; distinct hashes:", id)
+			for _, hash := range hashes {
+				fmt.Fprintf(&b, "\n  %s", hash)
+			}
+			b.WriteString("\n\nRetry with a longer prefix.")
+			return fmt.Errorf("%s", b.String())
+		}
+
+		// LIMIT bounds a potentially very large duplicate-content path list.
+		// ponytail: only the first ten locations are reported; page this list if
+		// a caller ever needs every duplicate path.
 		rows, err := a.DB.QueryContext(ctx, `
 			SELECT d.collection, d.path, COALESCE(d.title, ''), d.content_hash, c.body
 			FROM documents d
 			JOIN content c ON c.hash = d.content_hash
-			WHERE d.content_hash LIKE ? AND d.active = 1
+			WHERE d.content_hash = ? AND d.active = 1
 			ORDER BY d.collection, d.path
 			LIMIT 10
-		`, id+"%")
+		`, hashes[0])
 		if err != nil {
 			return fmt.Errorf("querying document: %w", err)
 		}
@@ -76,36 +124,23 @@ var getCmd = &cobra.Command{
 			if err := rows.Scan(&c.Collection, &c.Path, &c.Title, &c.Hash, &c.Body); err != nil {
 				return fmt.Errorf("reading document: %w", err)
 			}
+			c.SourceURI = search.SourceURI(c.Collection, c.Path)
 			matches = append(matches, c)
 		}
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("reading documents: %w", err)
 		}
 
-		switch {
-		case len(matches) == 0:
+		if len(matches) == 0 {
 			return fmt.Errorf("no document found with ID prefix %q", id)
-		case len(matches) > 1 && !sharedHash(matches):
-			// Printing every match silently was a correctness bug: the caller
-			// could not tell one document from a pile of them.
-			var b strings.Builder
-			fmt.Fprintf(&b, "ID prefix %q is ambiguous; matches:", id)
-			for _, c := range matches {
-				fmt.Fprintf(&b, "\n  %s  qi://%s/%s", c.Hash, c.Collection, c.Path)
-			}
-			b.WriteString("\n\nRetry with a longer prefix.")
-			return fmt.Errorf("%s", b.String())
 		}
 
-		if getMaxBytes < 0 {
-			return fmt.Errorf("--max-bytes must not be negative, got %d", getMaxBytes)
-		}
 		// Identical files dedupe to one content row, so several documents can
 		// share a hash. That is not an ambiguous prefix — no longer prefix
-		// exists — so return the content and name every path it lives at.
+		// exists — so return the content and list the locations found.
 		doc := matches[0]
 		for _, m := range matches[1:] {
-			doc.AlsoAt = append(doc.AlsoAt, fmt.Sprintf("qi://%s/%s", m.Collection, m.Path))
+			doc.AlsoAt = append(doc.AlsoAt, search.SourceURI(m.Collection, m.Path))
 		}
 		doc.Body, err = sliceLines(doc.Body, getLines)
 		if err != nil {
@@ -127,7 +162,7 @@ var getCmd = &cobra.Command{
 		fmt.Fprintf(os.Stdout, "# %s\n", doc.Title)
 		fmt.Fprintf(os.Stdout, "ID:         #%s\n", doc.Hash[:6])
 		fmt.Fprintf(os.Stdout, "Collection: %s\n", doc.Collection)
-		fmt.Fprintf(os.Stdout, "Path:       qi://%s/%s\n", doc.Collection, doc.Path)
+		fmt.Fprintf(os.Stdout, "Path:       %s\n", search.SourceURI(doc.Collection, doc.Path))
 		for _, p := range doc.AlsoAt {
 			fmt.Fprintf(os.Stdout, "Also at:    %s\n", p)
 		}

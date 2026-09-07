@@ -45,6 +45,10 @@ func stripHighlights(results []search.Result) []search.Result {
 	out := make([]search.Result, len(results))
 	for i, r := range results {
 		r.Snippet = highlightStripper.Replace(r.Snippet)
+		r.Passages = append([]search.Passage(nil), r.Passages...)
+		for j := range r.Passages {
+			r.Passages[j].Snippet = highlightStripper.Replace(r.Passages[j].Snippet)
+		}
 		out[i] = r
 	}
 	return out
@@ -80,7 +84,7 @@ func (f *TextFormatter) WriteResults(w io.Writer, results []search.Result) error
 		highlight = highlightANSI
 	}
 	for i, r := range results {
-		location := fmt.Sprintf("qi://%s/%s", r.Collection, r.Path)
+		location := fmt.Sprintf("%s#L%d-L%d", r.SourceURI, r.StartLine, r.EndLine)
 		if r.HeadingPath != "" {
 			location += " [" + r.HeadingPath + "]"
 		}
@@ -94,8 +98,12 @@ func (f *TextFormatter) WriteResults(w io.Writer, results []search.Result) error
 		}
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "   %s\n", location)
+		fmt.Fprintf(w, "   qi get %s --lines %d:%d\n", r.Hash, r.StartLine, r.EndLine)
 		if r.Snippet != "" {
 			fmt.Fprintf(w, "   %s\n", highlight.Replace(r.Snippet))
+		}
+		for _, p := range r.Passages {
+			fmt.Fprintf(w, "   [lines %d:%d] %s\n", p.StartLine, p.EndLine, highlight.Replace(p.Snippet))
 		}
 		if r.Explain != nil {
 			ex := r.Explain
@@ -136,15 +144,19 @@ func (f *MarkdownFormatter) WriteResults(w io.Writer, results []search.Result) e
 		return nil
 	}
 	for _, r := range results {
-		location := fmt.Sprintf("qi://%s/%s", r.Collection, r.Path)
+		location := fmt.Sprintf("%s#L%d-L%d", r.SourceURI, r.StartLine, r.EndLine)
 		fmt.Fprintf(w, "### %s\n", r.Title)
 		fmt.Fprintf(w, "**Location:** `%s`", location)
 		if r.HeadingPath != "" {
 			fmt.Fprintf(w, " › %s", r.HeadingPath)
 		}
 		fmt.Fprintln(w)
+		fmt.Fprintf(w, "**Retrieve:** `qi get %s --lines %d:%d`\n", r.Hash, r.StartLine, r.EndLine)
 		if r.Snippet != "" {
 			fmt.Fprintf(w, "> %s\n", highlightStripper.Replace(r.Snippet))
+		}
+		for _, p := range r.Passages {
+			fmt.Fprintf(w, "- **Lines %d:%d:** %s\n", p.StartLine, p.EndLine, highlightStripper.Replace(p.Snippet))
 		}
 		fmt.Fprintln(w)
 	}

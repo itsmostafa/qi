@@ -16,26 +16,26 @@ func TestBM25_MultilingualAndPunctuationQueries(t *testing.T) {
 		INSERT INTO content(hash, body) VALUES ('hcjk', 'body-cjk');
 		INSERT INTO documents(collection, path, title, content_hash)
 			VALUES ('test', 'cjk.md', 'CJK Doc', 'hcjk');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('hcjk', 1, 0, '这是 中文 文档 内容', 'Intro', 0, 9);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('hcjk', 1, 0, '这是 中文 文档 内容', 'Intro', 0, 9, 1, 1);
 
 		INSERT INTO content(hash, body) VALUES ('hcyr', 'body-cyr');
 		INSERT INTO documents(collection, path, title, content_hash)
 			VALUES ('test', 'cyr.md', 'Cyrillic Doc', 'hcyr');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('hcyr', 2, 0, 'привет мир программирование', 'Intro', 0, 27);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('hcyr', 2, 0, 'привет мир программирование', 'Intro', 0, 27, 1, 1);
 
 		INSERT INTO content(hash, body) VALUES ('hara', 'body-ara');
 		INSERT INTO documents(collection, path, title, content_hash)
 			VALUES ('test', 'ara.md', 'Arabic Doc', 'hara');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('hara', 3, 0, 'مرحبا بالعالم برمجة', 'Intro', 0, 20);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('hara', 3, 0, 'مرحبا بالعالم برمجة', 'Intro', 0, 20, 1, 1);
 
 		INSERT INTO content(hash, body) VALUES ('hacc', 'body-acc');
 		INSERT INTO documents(collection, path, title, content_hash)
 			VALUES ('test', 'acc.md', 'Accented Doc', 'hacc');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('hacc', 4, 0, 'Le café et le résumé sont sur la façade naïve.', 'Intro', 0, 47);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('hacc', 4, 0, 'Le café et le résumé sont sur la façade naïve.', 'Intro', 0, 47, 1, 1);
 	`); err != nil {
 		t.Fatalf("seeding multilingual data: %v", err)
 	}

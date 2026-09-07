@@ -79,8 +79,11 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 			c.id,
 			d.collection,
 			d.path,
+			d.content_hash,
 			COALESCE(d.title, d.path),
 			COALESCE(c.heading_path, ''),
+			COALESCE(c.start_line, 0),
+			COALESCE(c.end_line, 0),
 			COALESCE(d.doc_timestamp, ''),
 			snippet(chunks_fts, 0, ?, ?, '...', 32),
 			-bm25(chunks_fts)
@@ -89,6 +92,7 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 		JOIN documents d ON d.id = c.doc_id
 		WHERE chunks_fts MATCH ?
 		  AND d.active = 1
+		  AND c.start_line >= 1 AND c.end_line >= c.start_line
 		  %s
 		ORDER BY bm25(chunks_fts)
 	`, filters)
@@ -110,11 +114,13 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 		var r Result
 		var score float64
 		if err := rows.Scan(
-			&r.DocID, &r.ChunkID, &r.Collection, &r.Path,
-			&r.Title, &r.HeadingPath, &r.Timestamp, &r.Snippet, &score,
+			&r.DocID, &r.ChunkID, &r.Collection, &r.Path, &r.Hash,
+			&r.Title, &r.HeadingPath, &r.StartLine, &r.EndLine,
+			&r.Timestamp, &r.Snippet, &score,
 		); err != nil {
 			return nil, err
 		}
+		r.SourceURI = SourceURI(r.Collection, r.Path)
 		if seenDoc[r.DocID] {
 			continue // a document is represented by its best-ranked chunk
 		}
@@ -130,8 +136,74 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 			break
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if passageLimit(opts) > 0 && len(results) > 0 {
+		if err := b.addPassages(ctx, opts, ftsQuery, results); err != nil {
+			return nil, err
+		}
+	}
+	return results, nil
+}
 
-	return results, rows.Err()
+func (b *BM25) addPassages(ctx context.Context, opts SearchOpts, ftsQuery string, results []Result) error {
+	limit := passageLimit(opts)
+	if limit == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(results))
+	byDoc := make(map[int64]int, len(results))
+	for i, r := range results {
+		placeholders[i] = "?"
+		byDoc[r.DocID] = i
+	}
+	query := fmt.Sprintf(`
+		SELECT c.doc_id, c.id, COALESCE(c.heading_path, ''),
+		       COALESCE(c.start_line, 0), COALESCE(c.end_line, 0),
+		       snippet(chunks_fts, 0, ?, ?, '...', 32)
+		FROM chunks_fts
+		JOIN chunks c ON c.id = chunks_fts.rowid
+		JOIN documents d ON d.id = c.doc_id
+		WHERE chunks_fts MATCH ? AND d.active = 1
+		  AND c.start_line >= 1 AND c.end_line >= c.start_line
+		  AND c.doc_id IN (%s)
+		ORDER BY bm25(chunks_fts)
+	`, strings.Join(placeholders, ","))
+	// The snippet arguments and MATCH argument come first, followed by doc IDs.
+	args := []any{HighlightOpen, HighlightClose, ftsQuery}
+	for _, r := range results {
+		args = append(args, r.DocID)
+	}
+	counts := make(map[int64]int, len(results))
+	seen := make(map[int64]map[int64]bool, len(results))
+	for _, r := range results {
+		seen[r.DocID] = map[int64]bool{r.ChunkID: true}
+	}
+	rows, err := b.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("bm25 passages query: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var docID, chunkID int64
+		var p Passage
+		if err := rows.Scan(&docID, &chunkID, &p.HeadingPath, &p.StartLine, &p.EndLine, &p.Snippet); err != nil {
+			return err
+		}
+		if counts[docID] >= limit || seen[docID][chunkID] {
+			continue
+		}
+		r := &results[byDoc[docID]]
+		p.ChunkID = chunkID
+		r.Passages = append(r.Passages, p)
+		seen[docID][chunkID] = true
+		counts[docID]++
+	}
+	return rows.Err()
 }
 
 // ftsStopWords are common English words excluded from FTS5 queries to avoid

@@ -9,6 +9,7 @@ import (
 
 	"github.com/itsmostafa/qi/internal/config"
 	"github.com/itsmostafa/qi/internal/db"
+	"github.com/itsmostafa/qi/internal/parser"
 )
 
 func openTestDB(t *testing.T) *db.DB {
@@ -101,6 +102,121 @@ func TestIndexer_IncrementalUpdate(t *testing.T) {
 	}
 	if stats.FilesUpdated != 1 {
 		t.Errorf("expected 1 updated, got %d", stats.FilesUpdated)
+	}
+}
+
+type countingParser struct {
+	parser.Parser
+	calls int
+}
+
+func (p *countingParser) Parse(path string, data []byte) (*parser.Document, error) {
+	p.calls++
+	return p.Parser.Parse(path, data)
+}
+
+func TestIndexer_PersistsAndRepairsSourceLineRanges(t *testing.T) {
+	p := &countingParser{Parser: parser.For(".md")}
+	parser.Register(".md", p)
+	t.Cleanup(func() { parser.Register(".md", p.Parser) })
+	database := openTestDB(t)
+	idx := New(database, 256)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.md")
+	col := config.Collection{Name: "test", Path: dir, Extensions: []string{".md"}}
+	body := []byte("# Heading\none\ntwo")
+	if err := os.WriteFile(path, body, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := idx.Index(ctx, col); err != nil {
+		t.Fatal(err)
+	}
+
+	var chunkID int64
+	var startLine, endLine int
+	if err := database.QueryRowContext(ctx, `
+		SELECT c.id, c.start_line, c.end_line FROM chunks c
+		JOIN documents d ON d.id=c.doc_id WHERE d.path='doc.md'`).Scan(&chunkID, &startLine, &endLine); err != nil {
+		t.Fatalf("reading line range: %v", err)
+	}
+	if startLine != 2 || endLine != 3 {
+		t.Fatalf("got line range %d-%d, want 2-3", startLine, endLine)
+	}
+
+	// Simulate a pre-migration chunk. An exact layout match must repair only
+	// the nullable range and retain the chunk ID and its embedding.
+	if err := database.InsertEmbedding(ctx, chunkID, []float32{0.1, 0.2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO embeddings(chunk_id, provider, model, dimension) VALUES (?, 'test', 'test-model', 2)`, chunkID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`UPDATE chunks SET start_line=NULL, end_line=NULL WHERE id=?`, chunkID); err != nil {
+		t.Fatal(err)
+	}
+
+	p.calls = 0
+	stats, err := idx.Index(ctx, col)
+	if err != nil {
+		t.Fatalf("legacy range repair failed: %v", err)
+	}
+	if p.calls != 1 {
+		t.Fatalf("range repair parsed %d times, want 1", p.calls)
+	}
+	if stats.FilesUpdated != 0 || stats.FilesAdded != 0 {
+		t.Fatalf("range repair changed file stats: added=%d updated=%d", stats.FilesAdded, stats.FilesUpdated)
+	}
+	var repairedID int64
+	if err := database.QueryRowContext(ctx,
+		`SELECT c.id FROM chunks c JOIN documents d ON d.id=c.doc_id WHERE d.path='doc.md'`).Scan(&repairedID); err != nil {
+		t.Fatal(err)
+	}
+	if repairedID != chunkID {
+		t.Fatalf("range repair replaced chunk %d with %d", chunkID, repairedID)
+	}
+	if err := database.QueryRowContext(ctx,
+		`SELECT start_line, end_line FROM chunks WHERE id=?`, chunkID).Scan(&startLine, &endLine); err != nil {
+		t.Fatal(err)
+	}
+	if startLine != 2 || endLine != 3 {
+		t.Fatalf("repaired line range %d-%d, want 2-3", startLine, endLine)
+	}
+	var vectorCount int
+	if err := database.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM chunk_vectors WHERE chunk_id=?`, chunkID).Scan(&vectorCount); err != nil {
+		t.Fatal(err)
+	}
+	if vectorCount != 1 {
+		t.Fatalf("range repair dropped embedding, count=%d", vectorCount)
+	}
+
+	// If the old chunk layout cannot be proven equivalent, a matching source
+	// hash must still rebuild instead of taking the unchanged-date fast path.
+	if _, err := database.ExecContext(ctx,
+		`UPDATE chunks SET text='stale', start_line=NULL, end_line=NULL WHERE id=?`, chunkID); err != nil {
+		t.Fatal(err)
+	}
+	p.calls = 0
+	stats, err = idx.Index(ctx, col)
+	if err != nil {
+		t.Fatalf("legacy layout rebuild failed: %v", err)
+	}
+	if p.calls != 1 {
+		t.Fatalf("layout rebuild parsed %d times, want 1", p.calls)
+	}
+	if stats.FilesUpdated != 1 {
+		t.Fatalf("expected one updated file after unsafe legacy repair, got %d", stats.FilesUpdated)
+	}
+	if err := database.QueryRowContext(ctx,
+		`SELECT c.id, c.start_line, c.end_line FROM chunks c
+		 JOIN documents d ON d.id=c.doc_id WHERE d.path='doc.md'`).Scan(&repairedID, &startLine, &endLine); err != nil {
+		t.Fatal(err)
+	}
+	if repairedID == chunkID || startLine != 2 || endLine != 3 {
+		t.Fatalf("unsafe repair left chunk id/range as %d/%d-%d", repairedID, startLine, endLine)
 	}
 }
 

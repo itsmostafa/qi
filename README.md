@@ -102,7 +102,7 @@ qi doctor
 | `qi index [path\|collection]` | Index directory (current dir by default) or collection |
 | `qi search <query>` | BM25 full-text search |
 | `qi query <query>` | Hybrid search (BM25 + vector) |
-| `qi get <id>` | Retrieve document by 6-char hash ID (`--lines A:B`, `--max-bytes N`) |
+| `qi get <hash>` | Retrieve indexed source by full content hash or unambiguous prefix (`--lines A:B`, `--max-bytes N`) |
 | `qi list` | List all collections |
 | `qi delete <collection>` | Delete a collection and all its indexed data |
 | `qi stats` | Show index statistics |
@@ -159,17 +159,43 @@ providers:
   #   batch_size: 32
 ```
 
-## Document IDs
+## Retrieving and citing search hits
 
-Each document gets a short ID from the first 6 hex characters of its SHA-256 content hash:
+Every `search` and `query` hit includes a full SHA-256 `hash`, a `source_uri`
+identifying its collection/path, and 1-indexed, inclusive `start_line` and
+`end_line` ranges in the original indexed source. The hash identifies the source
+version; cite the URI, hash, and line range together. Integer `doc_id`/`chunk_id`
+fields are internal IDs, not arguments to `get`. If you override `--config`,
+use the same config for search and retrieval.
 
 ```sh
-qi get abc123
-qi get abc123 --lines 40:80      # 1-indexed, inclusive
-qi get abc123 --max-bytes 4096   # truncate long documents
+qi search "deployment" --format json
+# Copy hash, start_line and end_line from a hit:
+qi get <hash> --lines <start_line>:<end_line>
+qi get <hash> --max-bytes 4096
+
+# Include up to two additional matching passages per document:
+qi query "deployment" --passages 2 --format json
 ```
 
-A prefix matching more than one document is an error listing the candidates.
+`--passages` accepts 0–5 (default 0), without giving a document extra result slots
+or ranking votes. Supporting passages inherit the parent hit's hash and source
+URI. Ranges cover the source behind each chunk, not just highlighted words;
+Markdown syntax and frontmatter remain present when retrieved.
+
+`get` reads the **indexed snapshot**, not the live file. Editing a file does not
+change that snapshot until reindexing. Old hashes are not retained as revision
+history after replacement/deletion and index compaction. A hash alone does not
+prove the current file is unchanged.
+
+Unambiguous hash prefixes (such as `abc123`) also work. Identical content at
+multiple paths is returned once, with other locations in `also_at`; use the
+search hit's `source_uri` to retain the intended citation identity. Prefixes
+matching different content hashes are errors.
+
+Search skips chunks with missing or invalid source ranges. After upgrading an
+older index, run `qi index <collection>` to repair them. If the collection is no
+longer in config, index its source directory with `qi index /path/to/directory`.
 
 ## License
 

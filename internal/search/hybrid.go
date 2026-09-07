@@ -93,7 +93,7 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 	if k <= 0 {
 		k = 60
 	}
-	fused := ReciprocalRankFusion(bm25Results, vecResults, k)
+	fused := ReciprocalRankFusion(bm25Results, vecResults, k, passageLimit(opts))
 
 	if !opts.Explain {
 		for i := range fused {

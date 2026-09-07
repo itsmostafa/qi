@@ -18,6 +18,9 @@ func addRecencyFlags(cmd *cobra.Command, since, until, sort *string) {
 }
 
 func validateSearchOpts(opts search.SearchOpts) error {
+	if opts.Passages < 0 || opts.Passages > search.MaxPassages {
+		return fmt.Errorf("--passages must be between 0 and %d", search.MaxPassages)
+	}
 	checkDate := func(name, value string) error {
 		if value == "" {
 			return nil
