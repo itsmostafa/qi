@@ -63,14 +63,16 @@ qi query "question" --explain               # show BM25/vector/RRF score breakdo
 With no `--mode`, the mode comes from `search.default_mode` in the config (`hybrid` by default).
 
 ### `qi get <id>`
-Retrieve a document by its 6-character hash prefix (shown in search results). An
-ambiguous prefix is an error listing the candidates, never a dump of all of them.
+Retrieve the indexed source snapshot by the full `hash` returned in search JSON
+(or an unambiguous hex prefix). Use the hit's `start_line:end_line` for its source
+passage. An ambiguous prefix is an error; identical content at multiple paths is
+returned once, with other locations in `also_at`.
 
 ```bash
 qi get abc123
 qi get abc123 --lines 40:80      # 1-indexed, inclusive; "40:" and ":80" also work
 qi get abc123 --max-bytes 4096   # truncate and say so (0 = unlimited)
-qi get abc123 --format json      # {collection, path, title, hash, body, truncated}
+qi get abc123 --format json      # indexed source body and citation metadata
 ```
 
 Prefer `--lines`/`--max-bytes` over reading whole documents: they are what keeps
@@ -117,6 +119,7 @@ These are per-command, not global.
 |---|---|
 | `-c, --collection <name>` | Limit to a specific collection |
 | `-n, --limit <N>` | Number of results (default: 10) |
+| `--passages <N>` | Additional supporting passages per document, 0–5 (default: 0) |
 | `--since YYYY-MM-DD` | Only documents dated on or after this day |
 | `--until YYYY-MM-DD` | Only documents dated on or before this day |
 | `--sort date` | Newest first instead of by relevance |
@@ -196,7 +199,24 @@ providers:
 
 ## Document references
 
-Search results show locations like `qi://notes/2024/jan.md [Section > Subsection]` and a 6-character ID. Use `qi get <id>` to view the full document.
+Search JSON includes `hash` (full SHA-256 retrieval handle/source version),
+`source_uri` (collection/path identity), and `start_line`/`end_line` (1-indexed,
+inclusive raw-source range). Text/Markdown output includes a ready-to-run
+`qi get <hash> --lines A:B` command. Do not pass integer `doc_id` or `chunk_id`
+to `get`. Reuse the same `--config` override when retrieving a hit.
+
+Cite the source URI, hash, and line range together. `--passages N` optionally
+attaches bounded supporting passages that inherit the parent hash and URI;
+it does not add ranking votes or result slots for the document.
+
+`get` returns the indexed snapshot even if the file has since changed on disk.
+The hash is not a claim of live-file freshness. Reindexing can remove old
+versions; qi is not a revision archive. For identical-content paths, retain the
+search hit's URI rather than substituting get's first location.
+
+Search skips chunks with missing or invalid source ranges. Repair older indexes
+with `qi index <collection>`, or `qi index /path/to/directory` if the collection
+is no longer in config.
 
 ---
 
