@@ -106,6 +106,37 @@ func TestFrontmatterTimestampBeatsDate(t *testing.T) {
 	}
 }
 
+func TestFrontmatterScalarRangeStopsBeforeNextKey(t *testing.T) {
+	doc := parseMD(t, "---\ntitle: hello\ntags:\n  - foo\n---\n\nbody\n")
+	spans := sourceLineSpans(t, doc.Sections[0])
+	if len(spans) != 2 {
+		t.Fatalf("summary spans = %+v", spans)
+	}
+	if spans[0].StartLine != 2 || spans[0].EndLine != 2 {
+		t.Errorf("title span = %+v, want scalar line 2 only", spans[0])
+	}
+	if spans[1].StartLine != 4 || spans[1].EndLine != 4 {
+		t.Errorf("tags span = %+v, want value line 4", spans[1])
+	}
+}
+
+func TestFrontmatterSummaryUsesFieldRanges(t *testing.T) {
+	doc := parseMD(t, withFrontmatter)
+	spans := sourceLineSpans(t, doc.Sections[0])
+	if len(spans) != 3 {
+		t.Fatalf("summary spans = %+v", spans)
+	}
+	if spans[0].StartLine != 3 || spans[0].EndLine != 3 {
+		t.Errorf("title span = %+v, want line 3", spans[0])
+	}
+	if spans[1].StartLine != 4 || spans[1].EndLine != 4 {
+		t.Errorf("description span = %+v, want line 4", spans[1])
+	}
+	if spans[2].StartLine != 7 || spans[2].EndLine != 8 {
+		t.Errorf("tags span = %+v, want lines 7-8", spans[2])
+	}
+}
+
 func TestFrontmatterNeverReachesChunkBody(t *testing.T) {
 	got := bodyText(parseMD(t, withFrontmatter))
 	for _, leak := range []string{"resource:", "type:", "timestamp:", "tags:"} {
@@ -267,5 +298,74 @@ func TestFrontmatterDoesNotSuppressTheHeadingFallback(t *testing.T) {
 	}
 	if !strings.Contains(joined, "Project Unicorn") {
 		t.Errorf("sections = %+v, want one containing %q", doc.Sections, "Project Unicorn")
+	}
+}
+
+func TestSourceSpansRemainRawWithFrontmatterCRLFAndUnicode(t *testing.T) {
+	src := "---\r\ntitle: Café\r\n---\r\n\r\n# Héading\r\n\r\n- first café\r\n- second\r\n\r\n## Next\r\n\r\nbody\r\n"
+	doc := parseMD(t, src)
+	if len(doc.Sections) != 3 {
+		t.Fatalf("got %d sections: %+v", len(doc.Sections), doc.Sections)
+	}
+	if got := doc.Sections[0].SourceMap[0].StartLine; got != 2 {
+		t.Errorf("frontmatter title StartLine = %d, want 2", got)
+	}
+	for _, section := range doc.Sections[1:] {
+		if len(section.SourceMap) == 0 {
+			t.Fatalf("section %q has no source map", section.HeadingPath)
+		}
+		if section.Ordinal != section.SourceMap[0].Start {
+			t.Errorf("section %q Ordinal = %d, want source start %d", section.HeadingPath, section.Ordinal, section.SourceMap[0].Start)
+		}
+		for _, span := range section.SourceMap {
+			if span.StartLine < 6 || span.EndLine < span.StartLine {
+				t.Errorf("section %q has invalid raw span %+v", section.HeadingPath, span)
+			}
+		}
+	}
+	if got := doc.Sections[1].Text; !strings.Contains(got, "first café") {
+		t.Errorf("list transformation lost Unicode text: %q", got)
+	}
+	if got := sourceLineSpans(t, doc.Sections[1])[0].StartLine; got != 7 {
+		t.Errorf("first list item source line = %d, want 7", got)
+	}
+	if got := sourceLineSpans(t, doc.Sections[1])[1].StartLine; got != 8 {
+		t.Errorf("second list item source line = %d, want 8", got)
+	}
+}
+
+func TestSourceMapUsesIntervalsNotPerRuneEntries(t *testing.T) {
+	doc := parseMD(t, "# H\n\n"+strings.Repeat("x", 10000)+"\n")
+	if len(doc.Sections) != 1 || len(doc.Sections[0].SourceMap) >= len([]rune(doc.Sections[0].Text))/10 {
+		t.Fatalf("source map is not compressed: text=%d intervals=%d", len(doc.Sections[0].Text), len(doc.Sections[0].SourceMap))
+	}
+}
+
+func sourceLineSpans(t *testing.T, section Section) []SourceSpan {
+	t.Helper()
+	var spans []SourceSpan
+	start := 0
+	for _, line := range strings.Split(section.Text, "\n") {
+		span, ok := SourceRange(section.SourceMap, start, start+len(line))
+		if !ok {
+			t.Fatalf("no source range for %q", line)
+		}
+		spans = append(spans, span)
+		start += len(line) + 1
+	}
+	return spans
+}
+
+func TestCodeLinesKeepDistinctRawSpans(t *testing.T) {
+	doc := parseMD(t, "# Code\n\n```go\nα\nβ\n```\n")
+	spans := sourceLineSpans(t, doc.Sections[0])
+	if len(doc.Sections) != 1 || len(spans) != 2 {
+		t.Fatalf("sections = %+v, want two code-line spans", doc.Sections)
+	}
+	if spans[0].StartLine != 4 || spans[1].StartLine != 5 {
+		t.Errorf("code spans = %+v, want lines 4 and 5", spans)
+	}
+	if spans[0].Start >= spans[1].Start {
+		t.Errorf("code spans are not ordered: %+v", spans)
 	}
 }

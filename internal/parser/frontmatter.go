@@ -23,13 +23,31 @@ type Meta struct {
 // Summary renders the retrieval-worthy frontmatter as plain prose. It is empty
 // when there is nothing worth indexing.
 func (m Meta) Summary() string {
-	var parts []string
-	for _, s := range []string{m.Title, m.Description, strings.Join(m.Tags, ", ")} {
-		if s = strings.TrimSpace(s); s != "" {
-			parts = append(parts, s)
+	return strings.Join(m.summaryParts(), "\n")
+}
+
+type summaryField struct {
+	key  string
+	text string
+}
+
+func (m Meta) summaryFields() []summaryField {
+	var fields []summaryField
+	for _, field := range []summaryField{{"title", m.Title}, {"description", m.Description}, {"tags", strings.Join(m.Tags, ", ")}} {
+		if field.text = strings.TrimSpace(field.text); field.text != "" {
+			fields = append(fields, field)
 		}
 	}
-	return strings.Join(parts, "\n")
+	return fields
+}
+
+func (m Meta) summaryParts() []string {
+	fields := m.summaryFields()
+	parts := make([]string, len(fields))
+	for i, field := range fields {
+		parts[i] = field.text
+	}
+	return parts
 }
 
 // stringList accepts either a YAML sequence or a comma-separated scalar, both of
