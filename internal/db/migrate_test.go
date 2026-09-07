@@ -38,6 +38,44 @@ func TestMigration004RecoversAfterColumnAddedWithoutVersion(t *testing.T) {
 	}
 }
 
+// Migration 007's DDL can be present without its schema_version marker on any
+// database opened by a build that shipped the file before it recorded its own
+// version. Re-running the ALTER TABLE would fail, so the guard must recognise
+// the completed state and record the marker instead.
+func TestMigration007RecoversAfterColumnsAddedWithoutVersion(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "qi.db")
+	database, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `DELETE FROM schema_version WHERE version = 7`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err = Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopening partially applied migration: %v", err)
+	}
+	defer database.Close()
+
+	var versions, columns int
+	if err := database.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM schema_version WHERE version = 7`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info('chunks') WHERE name IN ('start_line', 'end_line')`).Scan(&columns); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 1 || columns != 2 {
+		t.Fatalf("recovery left version=%d columns=%d, want 1/2", versions, columns)
+	}
+}
+
 // Migration 006's DDL can be present without its schema_version marker on any
 // database opened by a build that shipped the file before it recorded its own
 // version. Re-running the ALTER TABLE would fail, so the guard must recognise

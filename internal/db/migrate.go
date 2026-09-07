@@ -132,6 +132,7 @@ func appliedVersions(ctx context.Context, tx *sql.Tx) (map[int]bool, error) {
 var addedColumns = map[int]struct{ table, column string }{
 	4: {"embeddings", "fingerprint"},
 	6: {"documents", "tags"},
+	7: {"chunks", "end_line"},
 }
 
 func columnExists(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {
