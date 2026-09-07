@@ -83,6 +83,11 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 	start := time.Now()
 	stats := Stats{}
 
+	// Detect legacy ranges once per collection, not once per unchanged file.
+	rangeRepairs, err := idx.chunkRangeRepairs(ctx, col.Name)
+	if err != nil {
+		return stats, fmt.Errorf("checking chunk line ranges: %w", err)
+	}
 	runID, err := idx.startRun(ctx, col.Name)
 	if err != nil {
 		return stats, err
@@ -175,7 +180,7 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 		if err == nil {
 			var info fs.FileInfo
 			if info, err = d.Info(); err == nil {
-				err = idx.indexFile(ctx, col, relPath, data, info.ModTime(), &stats)
+				err = idx.indexFile(ctx, col, relPath, data, info.ModTime(), rangeRepairs[relPath], &stats)
 			}
 		}
 		if err != nil {
@@ -293,7 +298,7 @@ func (idx *Indexer) compact(ctx context.Context) error {
 	return nil
 }
 
-func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPath string, data []byte, modTime time.Time, stats *Stats) error {
+func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPath string, data []byte, modTime time.Time, rangeRepairRequired bool, stats *Stats) error {
 	hash := sha256sum(data)
 
 	// Check if document exists (active or deactivated) and whether content changed
@@ -308,6 +313,9 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 		return fmt.Errorf("looking up existing document: %w", err)
 	}
 
+	var doc *parser.Document
+	var chunks []chunker.Chunk
+	var err error
 	if existingActive == 1 && existingHash == hash && !idx.Force {
 		// Unchanged bytes still need their date rechecked. Two rows land here:
 		// one indexed before dates existed, holding a NULL that no --since or
@@ -322,23 +330,35 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 		// stored.
 		// ponytail: parses every frontmatter-dated file each run; export a
 		// frontmatter-only date reader from parser if index time starts to hurt.
-		if existingTime.Valid && existingTime.String == documentDate("", modTime) {
+		if !rangeRepairRequired && existingTime.Valid && existingTime.String == documentDate("", modTime) {
 			return nil // unchanged
 		}
-		doc, err := parser.For(strings.ToLower(filepath.Ext(relPath))).Parse(relPath, data)
+		doc, err = parser.For(strings.ToLower(filepath.Ext(relPath))).Parse(relPath, data)
 		if err != nil {
 			return fmt.Errorf("parsing: %w", err)
 		}
+		if rangeRepairRequired {
+			// Keep embeddings only when the chunk layout is identical. Reuse
+			// this parse and chunking below if a rebuild is needed instead.
+			chunks = idx.chunker.Chunk(doc)
+			backfilled, err := idx.backfillChunkRanges(ctx, docID, chunks)
+			if err != nil {
+				return fmt.Errorf("backfilling chunk line ranges: %w", err)
+			}
+			rangeRepairRequired = !backfilled
+		}
 		docDate := documentDate(doc.Meta.Timestamp, modTime)
-		if docDate == existingTime.String {
-			return nil // frontmatter still supplies the date; mtime is irrelevant
+		if !rangeRepairRequired {
+			if docDate == existingTime.String {
+				return nil // frontmatter still supplies the date; mtime is irrelevant
+			}
+			if _, err := idx.db.ExecContext(ctx,
+				`UPDATE documents SET doc_timestamp=? WHERE id=?`,
+				docDate, docID); err != nil {
+				return fmt.Errorf("updating document date: %w", err)
+			}
+			return nil
 		}
-		if _, err := idx.db.ExecContext(ctx,
-			`UPDATE documents SET doc_timestamp=? WHERE id=?`,
-			docDate, docID); err != nil {
-			return fmt.Errorf("updating document date: %w", err)
-		}
-		return nil
 	}
 
 	// Fast-path: previously deactivated document restored with byte-identical content.
@@ -347,7 +367,7 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	// A row with no date is not fully indexed: reactivating it would restore a
 	// document that no date filter can ever match. Let it fall through and be
 	// rebuilt instead.
-	if docID != 0 && existingActive == 0 && existingHash == hash && existingTime.Valid && !idx.Force {
+	if docID != 0 && existingActive == 0 && existingHash == hash && existingTime.Valid && !idx.Force && !rangeRepairRequired {
 		if _, err := idx.db.ExecContext(ctx,
 			`UPDATE documents SET active=1, updated_at=datetime('now') WHERE id=?`, docID); err != nil {
 			return fmt.Errorf("reactivating document: %w", err)
@@ -363,14 +383,19 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 		return fmt.Errorf("inserting content: %w", err)
 	}
 
-	// Parse + chunk
-	ext := strings.ToLower(filepath.Ext(relPath))
-	p := parser.For(ext)
-	doc, err := p.Parse(relPath, data)
-	if err != nil {
-		return fmt.Errorf("parsing: %w", err)
+	// Parse + chunk unless the range repair already did it.
+	if doc == nil {
+		doc, err = parser.For(strings.ToLower(filepath.Ext(relPath))).Parse(relPath, data)
+		if err != nil {
+			return fmt.Errorf("parsing: %w", err)
+		}
+		chunks = idx.chunker.Chunk(doc)
 	}
-	chunks := idx.chunker.Chunk(doc)
+	for _, ch := range chunks {
+		if ch.StartLine <= 0 || ch.EndLine < ch.StartLine {
+			return fmt.Errorf("invalid source line range for chunk %d: %d-%d", ch.Seq, ch.StartLine, ch.EndLine)
+		}
+	}
 
 	// Upsert document
 	title := doc.Title
@@ -426,15 +451,114 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	// Insert chunks
 	for _, ch := range chunks {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			hash, newDocID, ch.Seq, ch.Text, ch.HeadingPath, ch.Ordinal, len(ch.Text))
+			`INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			hash, newDocID, ch.Seq, ch.Text, ch.HeadingPath, ch.Ordinal, len(ch.Text), ch.StartLine, ch.EndLine)
 		if err != nil {
 			return fmt.Errorf("inserting chunk: %w", err)
 		}
 	}
 
 	return tx.Commit()
+}
+
+// chunkRangeRepairs finds documents with unknown or invalid source ranges.
+// Empty documents have no chunks and need no repair. Include inactive rows so
+// the reactivation fast path cannot restore chunks without usable citations.
+func (idx *Indexer) chunkRangeRepairs(ctx context.Context, collection string) (map[string]bool, error) {
+	rows, err := idx.db.QueryContext(ctx, `
+		SELECT DISTINCT d.path FROM chunks c JOIN documents d ON d.id=c.doc_id
+		WHERE d.collection=? AND
+		(c.start_line IS NULL OR c.end_line IS NULL OR c.start_line < 1 OR c.end_line < c.start_line)`, collection)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	repairs := map[string]bool{}
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, err
+		}
+		repairs[path] = true
+	}
+	return repairs, rows.Err()
+}
+
+// backfillChunkRanges updates legacy chunks in place when the current parser
+// and chunker produce exactly the same chunk text and metadata. Ordinal is not
+// part of the identity: older indexers recorded a section start, while the
+// current chunker records the chunk start. Updating it here is safe because
+// embeddings are generated from chunk text (and heading/text identity is
+// unchanged). If anything else differs, callers rebuild the chunks and the
+// embedding repair pass regenerates vectors.
+func (idx *Indexer) backfillChunkRanges(ctx context.Context, docID int64, chunks []chunker.Chunk) (bool, error) {
+	type storedChunk struct {
+		id, seq, length int64
+		text, heading   string
+		headingValid    bool
+	}
+
+	rows, err := idx.db.QueryContext(ctx, `
+		SELECT id, seq, text, heading_path, content_length
+		FROM chunks WHERE doc_id=? ORDER BY seq`, docID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	stored := make([]storedChunk, 0, len(chunks))
+	for rows.Next() {
+		var c storedChunk
+		var headingText sql.NullString
+		if err := rows.Scan(&c.id, &c.seq, &c.text, &headingText, &c.length); err != nil {
+			return false, err
+		}
+		c.headingValid, c.heading = headingText.Valid, headingText.String
+		stored = append(stored, c)
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	if len(stored) == 0 || len(stored) != len(chunks) {
+		return false, nil
+	}
+
+	for i, old := range stored {
+		ch := chunks[i]
+		if ch.StartLine <= 0 || ch.EndLine < ch.StartLine {
+			return false, fmt.Errorf("invalid source line range for chunk %d: %d-%d", ch.Seq, ch.StartLine, ch.EndLine)
+		}
+		if old.seq != int64(ch.Seq) || old.text != ch.Text ||
+			!old.headingValid || old.heading != ch.HeadingPath ||
+			old.length != int64(len(ch.Text)) {
+			return false, nil
+		}
+	}
+
+	// Update source locations from the current chunker. This transaction leaves
+	// chunk IDs and their vector/embedding rows intact when the exact-match
+	// proof succeeds.
+	tx, err := idx.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for i, old := range stored {
+		ch := chunks[i]
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE chunks SET ordinal=?, start_line=?, end_line=? WHERE id=?`,
+			ch.Ordinal, ch.StartLine, ch.EndLine, old.id); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // staleActivePaths returns the failed paths whose previously indexed document
