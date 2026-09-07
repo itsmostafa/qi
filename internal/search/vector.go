@@ -59,8 +59,11 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 			c.id,
 			d.collection,
 			d.path,
+			d.content_hash,
 			COALESCE(d.title, d.path),
 			COALESCE(c.heading_path, ''),
+			COALESCE(c.start_line, 0),
+			COALESCE(c.end_line, 0),
 			COALESCE(d.doc_timestamp, ''),
 			c.text,
 			cv.vector
@@ -69,6 +72,7 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 		JOIN documents d ON d.id = c.doc_id
 		JOIN embeddings em ON em.chunk_id = cv.chunk_id
 		WHERE d.active = 1
+		  AND c.start_line >= 1 AND c.end_line >= c.start_line
 		  AND em.fingerprint = ?
 		  %s
 	`, collectionFilter)
@@ -84,11 +88,13 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 		var r Result
 		var blob []byte
 		if err := rows.Scan(
-			&r.DocID, &r.ChunkID, &r.Collection, &r.Path,
-			&r.Title, &r.HeadingPath, &r.Timestamp, &r.Snippet, &blob,
+			&r.DocID, &r.ChunkID, &r.Collection, &r.Path, &r.Hash,
+			&r.Title, &r.HeadingPath, &r.StartLine, &r.EndLine,
+			&r.Timestamp, &r.Snippet, &blob,
 		); err != nil {
 			return nil, err
 		}
+		r.SourceURI = SourceURI(r.Collection, r.Path)
 		if err := db.ValidateEmbeddingBlob(blob, len(queryEmbedding)); err != nil {
 			// Defense in depth: fingerprint matching should exclude stale
 			// dimensions, while shared validation also rejects malformed,
@@ -111,26 +117,45 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 
 	// One chunk per document, for the same reason BM25 stops at poolSize
 	// distinct documents: a verbose file must not fill the pool with chunks
-	// that collapse to a single result later.
-	deduped := candidates[:0:0]
+	// that collapse to a single result later. Supporting passages are gathered
+	// only after this document pool is fixed.
+	selected := make([]vecCandidate, 0, topK)
 	seenDoc := map[int64]bool{}
 	for _, c := range candidates {
 		if seenDoc[c.DocID] {
 			continue
 		}
 		seenDoc[c.DocID] = true
-		deduped = append(deduped, c)
-		if len(deduped) >= topK {
+		selected = append(selected, c)
+		if len(selected) >= topK {
 			break
 		}
 	}
-	candidates = deduped
 
-	results := make([]Result, len(candidates))
-	for i, c := range candidates {
+	results := make([]Result, len(selected))
+	for i, c := range selected {
 		r := c.Result
 		r.Score = 1.0 / (1.0 + c.dist)
 		results[i] = r
+	}
+	if limit := passageLimit(opts); limit > 0 {
+		resultByDoc := make(map[int64]int, len(results))
+		primaryByDoc := make(map[int64]int64, len(results))
+		counts := make(map[int64]int, len(results))
+		for i, r := range results {
+			resultByDoc[r.DocID] = i
+			primaryByDoc[r.DocID] = r.ChunkID
+		}
+		for _, c := range candidates {
+			if _, ok := resultByDoc[c.DocID]; !ok || c.ChunkID == primaryByDoc[c.DocID] || counts[c.DocID] >= limit {
+				continue
+			}
+			results[resultByDoc[c.DocID]].Passages = append(results[resultByDoc[c.DocID]].Passages, Passage{
+				ChunkID: c.ChunkID, HeadingPath: c.HeadingPath, Snippet: c.Snippet,
+				StartLine: c.StartLine, EndLine: c.EndLine,
+			})
+			counts[c.DocID]++
+		}
 	}
 	return results, nil
 }

@@ -28,14 +28,14 @@ func seedTestData(t *testing.T, database *db.DB) {
 		INSERT INTO content(hash, body) VALUES ('hash1', 'body1');
 		INSERT INTO documents(collection, path, title, content_hash)
 			VALUES ('test', 'doc1.md', 'Go Programming', 'hash1');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('hash1', 1, 0, 'Go is an open source programming language.', 'Intro', 0, 41);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('hash1', 1, 0, 'Go is an open source programming language.', 'Intro', 0, 41, 1, 1);
 
 		INSERT INTO content(hash, body) VALUES ('hash2', 'body2');
 		INSERT INTO documents(collection, path, title, content_hash)
 			VALUES ('test', 'doc2.md', 'Python Tutorial', 'hash2');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('hash2', 2, 0, 'Python is a high-level programming language.', 'Intro', 0, 44);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('hash2', 2, 0, 'Python is a high-level programming language.', 'Intro', 0, 44, 1, 1);
 	`)
 	if err != nil {
 		t.Fatalf("seeding test data: %v", err)
@@ -69,6 +69,45 @@ func TestBM25_Search(t *testing.T) {
 	}
 }
 
+func TestBM25_ResultMetadataAndBoundedPassages(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO content(hash, body) VALUES ('full-hash', 'source');
+		INSERT INTO documents(collection, path, title, content_hash)
+			VALUES ('test', 'dir/a b.md', 'A', 'full-hash');
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('full-hash', 1, 0, 'needle primary', 'Intro', 0, 14, 3, 4);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('full-hash', 1, 1, 'needle support one', 'Details', 20, 18, 8, 9);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('full-hash', 1, 2, 'needle support two', 'More', 40, 18, 12, 13);
+	`); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	results, err := NewBM25(database).Search(ctx, SearchOpts{Query: "needle", TopK: 1, Passages: 1})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1", len(results))
+	}
+	r := results[0]
+	if r.Hash != "full-hash" || r.SourceURI != "qi://test/dir/a%20b.md" {
+		t.Fatalf("metadata = hash %q uri %q", r.Hash, r.SourceURI)
+	}
+	if r.StartLine == 0 || r.EndLine == 0 {
+		t.Fatalf("missing primary range: %d-%d", r.StartLine, r.EndLine)
+	}
+	if len(r.Passages) != 1 || r.Passages[0].ChunkID == r.ChunkID {
+		t.Fatalf("passages = %+v, want one additional chunk", r.Passages)
+	}
+	if r.Passages[0].StartLine != 8 || r.Passages[0].EndLine != 9 {
+		t.Errorf("passage range = %d-%d, want 8-9", r.Passages[0].StartLine, r.Passages[0].EndLine)
+	}
+}
+
 func TestBM25_CollectionFilter(t *testing.T) {
 	database := openTestDB(t)
 	seedTestData(t, database)
@@ -79,8 +118,8 @@ func TestBM25_CollectionFilter(t *testing.T) {
 		INSERT INTO content(hash, body) VALUES ('hash3', 'body3');
 		INSERT INTO documents(collection, path, title, content_hash)
 			VALUES ('other', 'doc3.md', 'Rust Language', 'hash3');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('hash3', 3, 0, 'Rust is a systems programming language.', 'Intro', 0, 39);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('hash3', 3, 0, 'Rust is a systems programming language.', 'Intro', 0, 39, 1, 1);
 	`)
 	if err != nil {
 		t.Fatalf("seeding: %v", err)
@@ -162,8 +201,8 @@ func TestBM25PoolIsBoundedByDocuments(t *testing.T) {
 	}
 	for i := range 30 {
 		if _, err := database.ExecContext(ctx,
-			`INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			 VALUES ('hv', 1, ?, 'widget widget widget', 'S', 0, 20)`, i); err != nil {
+			`INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			 VALUES ('hv', 1, ?, 'widget widget widget', 'S', 0, 20, ?, ?)`, i, i+1, i+1); err != nil {
 			t.Fatalf("seeding chunk %d: %v", i, err)
 		}
 	}
@@ -179,8 +218,8 @@ func TestBM25PoolIsBoundedByDocuments(t *testing.T) {
 			t.Fatalf("seeding other document %d: %v", i, err)
 		}
 		if _, err := database.ExecContext(ctx,
-			`INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			 SELECT ?, id, 0, 'a widget lives here', 'S', 0, 19 FROM documents WHERE path = ?`,
+			`INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			 SELECT ?, id, 0, 'a widget lives here', 'S', 0, 19, 1, 1 FROM documents WHERE path = ?`,
 			hash, path); err != nil {
 			t.Fatalf("seeding chunk for other document %d: %v", i, err)
 		}

@@ -48,7 +48,7 @@ func TestApplyExtensionBoost_DefaultBoost(t *testing.T) {
 }
 
 func TestRRF_EmptyLists(t *testing.T) {
-	result := ReciprocalRankFusion(nil, nil, 60)
+	result := ReciprocalRankFusion(nil, nil, 60, 0)
 	if len(result) != 0 {
 		t.Errorf("expected empty result, got %d items", len(result))
 	}
@@ -60,7 +60,7 @@ func TestRRF_OnlyBM25(t *testing.T) {
 		makeResult(2, 2.0),
 		makeResult(3, 1.0),
 	}
-	results := ReciprocalRankFusion(bm25, nil, 60)
+	results := ReciprocalRankFusion(bm25, nil, 60, 0)
 	if len(results) != 3 {
 		t.Fatalf("expected 3 results, got %d", len(results))
 	}
@@ -74,7 +74,7 @@ func TestRRF_MergesLists(t *testing.T) {
 	bm25 := []Result{makeResult(1, 3.0), makeResult(2, 2.0)}
 	vec := []Result{makeResult(2, 0.9), makeResult(3, 0.8)}
 
-	results := ReciprocalRankFusion(bm25, vec, 60)
+	results := ReciprocalRankFusion(bm25, vec, 60, 0)
 
 	// chunk 2 appears in both → should score highest
 	if results[0].ChunkID != 2 {
@@ -85,11 +85,45 @@ func TestRRF_MergesLists(t *testing.T) {
 	}
 }
 
+func TestRRF_MergesPassagesWithoutChangingWinnerOrRank(t *testing.T) {
+	bm25 := []Result{{DocID: 99, ChunkID: 90, Score: 3}, {
+		DocID: 1, ChunkID: 10, Hash: "bm-hash", SourceURI: "qi://c/a.md", Score: 2,
+		Passages: []Passage{{ChunkID: 11, Snippet: "bm support"}, {ChunkID: 12, Snippet: "shared"}},
+	}}
+	vec := []Result{{
+		DocID: 1, ChunkID: 20, Hash: "vec-hash", SourceURI: "qi://c/a.md", Score: 1,
+		Passages: []Passage{{ChunkID: 12, Snippet: "shared"}, {ChunkID: 13, Snippet: "vec support"}},
+	}}
+	results := ReciprocalRankFusion(bm25, vec, 60, 3)
+	var winner Result
+	for _, r := range results {
+		if r.DocID == 1 {
+			winner = r
+		}
+	}
+	if winner.ChunkID != 20 || winner.Hash != "vec-hash" {
+		t.Fatalf("winner metadata = %+v, want vector winner", winner)
+	}
+	if len(winner.Passages) != 3 {
+		t.Fatalf("passages = %+v, want 3 unique supports", winner.Passages)
+	}
+	seen := map[int64]bool{}
+	for _, p := range winner.Passages {
+		if seen[p.ChunkID] {
+			t.Fatalf("passage chunk %d counted twice", p.ChunkID)
+		}
+		seen[p.ChunkID] = true
+	}
+	if winner.Explain == nil || winner.Explain.BM25Rank != 2 || winner.Explain.VectorRank != 1 {
+		t.Fatalf("rank explanation = %+v", winner.Explain)
+	}
+}
+
 func TestRRF_ScoresDescending(t *testing.T) {
 	bm25 := []Result{makeResult(1, 3.0), makeResult(2, 2.0), makeResult(3, 1.0)}
 	vec := []Result{makeResult(3, 0.9), makeResult(2, 0.8), makeResult(1, 0.7)}
 
-	results := ReciprocalRankFusion(bm25, vec, 60)
+	results := ReciprocalRankFusion(bm25, vec, 60, 0)
 	for i := 1; i < len(results); i++ {
 		if results[i].Score > results[i-1].Score {
 			t.Errorf("results not sorted descending at index %d: %.6f > %.6f",
@@ -102,7 +136,7 @@ func TestRRF_ArithmeticK60(t *testing.T) {
 	// Rank 1 in both lists with k=60 should give 2 * 1/(60+1)
 	bm25 := []Result{makeResult(1, 1.0)}
 	vec := []Result{makeResult(1, 1.0)}
-	results := ReciprocalRankFusion(bm25, vec, 60)
+	results := ReciprocalRankFusion(bm25, vec, 60, 0)
 	expected := 2.0 / 61.0
 	if len(results) == 0 {
 		t.Fatal("no results")
@@ -122,7 +156,7 @@ func TestRRF_FusesByDocument(t *testing.T) {
 		{DocID: 10, ChunkID: 1, Score: 2.0},
 		{DocID: 10, ChunkID: 2, Score: 1.0},
 	}
-	results := ReciprocalRankFusion(bm25, nil, 60)
+	results := ReciprocalRankFusion(bm25, nil, 60, 0)
 
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results (one per document), got %d", len(results))
@@ -149,7 +183,7 @@ func TestRRF_RepresentativeChunkComesFromTheBetterRankedList(t *testing.T) {
 	}
 	vec := []Result{{DocID: 10, ChunkID: 2}}
 
-	for _, r := range ReciprocalRankFusion(bm25, vec, 60) {
+	for _, r := range ReciprocalRankFusion(bm25, vec, 60, 0) {
 		if r.DocID != 10 {
 			continue
 		}

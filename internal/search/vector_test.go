@@ -13,13 +13,13 @@ func TestVectorSearch_FiltersByFingerprint(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `
 		INSERT INTO content(hash, body) VALUES ('h1', 'b1');
 		INSERT INTO documents(collection, path, title, content_hash) VALUES ('test', 'a.md', 'A', 'h1');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('h1', 1, 0, 'chunk from current model', 'Intro', 0, 25);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('h1', 1, 0, 'chunk from current model', 'Intro', 0, 25, 1, 1);
 
 		INSERT INTO content(hash, body) VALUES ('h2', 'b2');
 		INSERT INTO documents(collection, path, title, content_hash) VALUES ('test', 'b.md', 'B', 'h2');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('h2', 2, 0, 'chunk from stale model', 'Intro', 0, 23);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('h2', 2, 0, 'chunk from stale model', 'Intro', 0, 23, 1, 1);
 	`); err != nil {
 		t.Fatalf("seeding documents/chunks: %v", err)
 	}
@@ -59,8 +59,8 @@ func TestVectorSearch_EmptyFingerprintReturnsNoResults(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `
 		INSERT INTO content(hash, body) VALUES ('h1', 'b1');
 		INSERT INTO documents(collection, path, title, content_hash) VALUES ('test', 'a.md', 'A', 'h1');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('h1', 1, 0, 'chunk text', 'Intro', 0, 10);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('h1', 1, 0, 'chunk text', 'Intro', 0, 10, 1, 1);
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -100,8 +100,8 @@ func TestVectorSearch_SkipsMismatchedDimensionDefensively(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `
 		INSERT INTO content(hash, body) VALUES ('h1', 'b1');
 		INSERT INTO documents(collection, path, title, content_hash) VALUES ('test', 'a.md', 'A', 'h1');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('h1', 1, 0, 'chunk text', 'Intro', 0, 10);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('h1', 1, 0, 'chunk text', 'Intro', 0, 10, 1, 1);
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +127,46 @@ func TestVectorSearch_SkipsMismatchedDimensionDefensively(t *testing.T) {
 
 // A document with several near chunks must not occupy several slots: the pool
 // is bounded by documents, so its nearest chunk represents it.
+func TestVectorSearch_MetadataAndBoundedPassages(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO content(hash, body) VALUES ('vector-hash', 'source');
+		INSERT INTO documents(collection, path, title, content_hash)
+			VALUES ('test', 'notes/a b.md', 'A', 'vector-hash');
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('vector-hash', 1, 0, 'nearest', 'Intro', 0, 7, 2, 3);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('vector-hash', 1, 1, 'support one', 'Details', 20, 11, 6, 7);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('vector-hash', 1, 2, 'support two', 'More', 40, 11, 10, 11);
+	`); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+	for id, vector := range map[int64][]float32{
+		1: {1, 0, 0, 0},
+		2: {0.99, 0.14, 0, 0},
+		3: {0.98, 0.2, 0, 0},
+	} {
+		if err := database.UpsertEmbedding(ctx, id, vector, "test", "model", 4, "fp"); err != nil {
+			t.Fatalf("embedding %d: %v", id, err)
+		}
+	}
+	results, err := NewVectorSearch(database, "fp").Search(ctx, []float32{1, 0, 0, 0}, 1, SearchOpts{Passages: 1})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 || results[0].Hash != "vector-hash" || results[0].SourceURI != "qi://test/notes/a%20b.md" {
+		t.Fatalf("result metadata = %+v", results)
+	}
+	if results[0].StartLine != 2 || results[0].EndLine != 3 {
+		t.Fatalf("primary range = %d-%d", results[0].StartLine, results[0].EndLine)
+	}
+	if len(results[0].Passages) != 1 || results[0].Passages[0].StartLine != 6 {
+		t.Fatalf("passages = %+v, want one bounded support", results[0].Passages)
+	}
+}
+
 func TestVectorSearch_OneChunkPerDocument(t *testing.T) {
 	database := openTestDB(t)
 	ctx := context.Background()
@@ -134,15 +174,15 @@ func TestVectorSearch_OneChunkPerDocument(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `
 		INSERT INTO content(hash, body) VALUES ('h1', 'b1');
 		INSERT INTO documents(collection, path, title, content_hash) VALUES ('test', 'a.md', 'A', 'h1');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('h1', 1, 0, 'near', 'Intro', 0, 4);
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('h1', 1, 1, 'also near', 'Intro', 0, 9);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('h1', 1, 0, 'near', 'Intro', 0, 4, 1, 1);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('h1', 1, 1, 'also near', 'Intro', 0, 9, 2, 2);
 
 		INSERT INTO content(hash, body) VALUES ('h2', 'b2');
 		INSERT INTO documents(collection, path, title, content_hash) VALUES ('test', 'b.md', 'B', 'h2');
-		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length)
-			VALUES ('h2', 2, 0, 'further', 'Intro', 0, 7);
+		INSERT INTO chunks(content_hash, doc_id, seq, text, heading_path, ordinal, content_length, start_line, end_line)
+			VALUES ('h2', 2, 0, 'further', 'Intro', 0, 7, 1, 1);
 	`); err != nil {
 		t.Fatalf("seeding: %v", err)
 	}
