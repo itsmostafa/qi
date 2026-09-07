@@ -15,6 +15,7 @@ import (
 var (
 	searchCollection string
 	searchTopK       int
+	searchPassages   int
 	searchSince      string
 	searchUntil      string
 	searchSort       string
@@ -37,6 +38,7 @@ var searchCmd = &cobra.Command{
 			Query:      query,
 			Collection: searchCollection,
 			TopK:       searchTopK,
+			Passages:   searchPassages,
 			Pool:       a.Config.Search.BM25TopK,
 			Mode:       "lexical",
 			Since:      searchSince,
@@ -61,5 +63,6 @@ var searchCmd = &cobra.Command{
 func init() {
 	searchCmd.Flags().StringVarP(&searchCollection, "collection", "c", "", "limit to a specific collection")
 	searchCmd.Flags().IntVarP(&searchTopK, "limit", "n", 10, "number of results to return")
+	searchCmd.Flags().IntVar(&searchPassages, "passages", 0, "additional supporting passages per document (0–5)")
 	addRecencyFlags(searchCmd, &searchSince, &searchUntil, &searchSort)
 }

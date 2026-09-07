@@ -17,6 +17,7 @@ var (
 	queryExplain    bool
 	queryCollection string
 	queryTopK       int
+	queryPassages   int
 	querySince      string
 	queryUntil      string
 	querySort       string
@@ -44,6 +45,7 @@ var queryCmd = &cobra.Command{
 			Query:      q,
 			Collection: queryCollection,
 			TopK:       queryTopK,
+			Passages:   queryPassages,
 			Pool:       a.Config.Search.BM25TopK,
 			Mode:       mode,
 			Explain:    queryExplain,
@@ -84,5 +86,6 @@ func init() {
 	queryCmd.Flags().BoolVar(&queryExplain, "explain", false, "show scoring breakdown")
 	queryCmd.Flags().StringVarP(&queryCollection, "collection", "c", "", "limit to a specific collection")
 	queryCmd.Flags().IntVarP(&queryTopK, "limit", "n", 10, "number of results to return")
+	queryCmd.Flags().IntVar(&queryPassages, "passages", 0, "additional supporting passages per document (0–5)")
 	addRecencyFlags(queryCmd, &querySince, &queryUntil, &querySort)
 }
