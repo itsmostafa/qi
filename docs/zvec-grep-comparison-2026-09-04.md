@@ -2,7 +2,7 @@
 
 Date: 2026-09-04 (America/Los_Angeles).
 
-Reviewed zvec-grep commit `52653951b24617762f4ab0c71c34d594e5001617` and qi working tree based on `0e1830d8fb7b663a3a5b2946616abf6ff4569938`, including existing uncommitted changes. Three Luna subagents investigated retrieval, indexing, and agent UX; the primary agent checked and consolidated findings. This is source inspection, not a measured performance comparison. The original audit performed no implementation or benchmark runs; the implementation follow-ups for findings 1 and 2 are recorded below. Existing user changes were preserved.
+Reviewed zvec-grep commit `52653951b24617762f4ab0c71c34d594e5001617` and qi working tree based on `0e1830d8fb7b663a3a5b2946616abf6ff4569938`, including existing uncommitted changes. Three Luna subagents investigated retrieval, indexing, and agent UX; the primary agent checked and consolidated findings. This is source inspection, not a measured performance comparison. The original audit performed no implementation or benchmark runs; the implementation follow-ups for findings 1, 2 and 3 are recorded below. Existing user changes were preserved.
 
 ## Recommendation
 
@@ -77,6 +77,44 @@ stop, and the spent retry budget.
 
 **Verify:** nested rules and negation, root dot-directories, exclude-to-include transitions, and relevant in-scope hits buried below out-of-scope candidates.
 
+**Validation:** the zg references hold — its scanner reads `.gitignore` and
+configured ignore files, parses gitignore-style rules with negation and
+anchoring, gates hidden files, and takes `maxFileSizeBytes`/`maxDepth` from
+config; its indexed queries accept `-g/--iglob/-t/-T`. The qi gap held too, at
+lines 105–107 and 147 rather than the line numbers above, which had drifted. And
+checking it surfaced a bug the finding missed: `ignore` was documented as
+"directory/file names" (`docs/configuration.md`) but was only ever consulted for
+directories, so `ignore: [README.md]` did nothing. One sub-item needed no work:
+removing now-excluded files was already defined, because a path absent from
+`seenPaths` is deactivated by the existing reconciliation and then hard-deleted
+by compaction.
+
+**Implementation follow-up:** `config.PathMatch` is one glob dialect shared by
+both sides of the finding — `path.Match` semantics applied to the
+collection-relative path, its basename and every ancestor, so `drafts` and
+`drafts/*` both cover `drafts/a/b.md` and `*.draft.md` matches at any depth, while
+a pattern without metacharacters stays the exact match existing configs rely on.
+Indexing applies it to files as well as directories, which fixes the bug above;
+an ignored file is left out of `seenPaths`, so adding a pattern removes what it
+now covers on the next `qi index`. Secure symlink handling is untouched: the
+walk still refuses to follow file symlinks and still reads descriptor-relatively
+under the canonical root. `qi search`/`qi query --path <glob>` filter on the same
+dialect inside both retrieval loops, before the per-document collapse and before
+the limit, so an in-scope document buried under higher-ranked out-of-scope hits
+is still returned; a malformed glob is rejected rather than silently matching
+nothing, as is a malformed `ignore` pattern at config load. Paths are
+collection-relative, so without `-c` the glob applies within every collection.
+
+Declined, with reasons rather than half-built: gitignore file discovery and `!`
+negation, which need a dependency or a rule engine and target working trees
+rather than the notes directories qi collections point at; a configurable
+`max_file_size`, which the 10 MiB constant already names as its upgrade path and
+nobody has asked for; and ripgrep-style `-t/-T` type filters, which `extensions`
+already decides at index time for a corpus of Markdown and plaintext. `task check`
+passes, including glob and literal ignores over files and directories, a newly
+ignored file being removed on reindex, a rejected `ignore` glob, and a scoped
+search whose only in-scope document ranks below every out-of-scope one.
+
 ## 4. P1: Report operational status and freshness (medium; watcher later)
 
 **What zg gets right:** an explicit status/readiness interface and freshness semantics, backed by a watcher with reconciliation ([watch manager](https://github.com/zvec-ai/zvec-grep/blob/52653951b24617762f4ab0c71c34d594e5001617/src/daemon/watch-manager.ts#L58), [execution modes](https://github.com/zvec-ai/zvec-grep/blob/52653951b24617762f4ab0c71c34d594e5001617/docs/06-server.md)).
@@ -148,10 +186,10 @@ Benchmark representative collection sizes. First consider retaining only the bes
 
 1. Public retrieval handles, exact source ranges, and search→get tests. Done.
 2. Batch embedding persistence/recovery (done) and structured status.
-3. Shared discovery/query filters and bounded preview output.
+3. Shared discovery/query filters (done) and bounded preview output.
 4. Evaluation corpus; use it to decide multi-query/refill/ranking changes.
 5. Broader agent setup; optional watch, code parsers, or ANN only with demonstrated demand.
 
 The original audit proposed these changes without changing code or running
-`task check`. Findings 1 and 2 now have implementation follow-ups above; the
+`task check`. Findings 1, 2 and 3 now have implementation follow-ups above; the
 remaining findings are still proposals.
