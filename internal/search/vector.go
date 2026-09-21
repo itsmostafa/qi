@@ -94,6 +94,9 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 		); err != nil {
 			return nil, err
 		}
+		if !inScope(opts.Path, r.Path) {
+			continue
+		}
 		r.SourceURI = SourceURI(r.Collection, r.Path)
 		if err := db.ValidateEmbeddingBlob(blob, len(queryEmbedding)); err != nil {
 			// Defense in depth: fingerprint matching should exclude stale

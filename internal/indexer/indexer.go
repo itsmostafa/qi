@@ -102,9 +102,16 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 		}
 	}
 
-	ignoreSet := make(map[string]bool)
-	for _, ig := range col.Ignore {
-		ignoreSet[ig] = true
+	// Ignore patterns are globs over the collection-relative path, applied to
+	// directories and files alike — `ignore` has always been documented as
+	// "directory/file names", but only directories were ever checked.
+	ignored := func(rel string) bool {
+		for _, pattern := range col.Ignore {
+			if config.PathMatch(pattern, rel) {
+				return true
+			}
+		}
+		return false
 	}
 
 	// Canonicalize the collection root once so a configured symlinked root is
@@ -136,6 +143,11 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 		if err != nil {
 			return err
 		}
+		rel, relErr := filepath.Rel(canonicalRoot, path)
+		if relErr != nil {
+			return relErr
+		}
+
 		if d.IsDir() {
 			name := d.Name()
 			// Never skip the root itself based on its own basename — a
@@ -144,7 +156,7 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 			// otherwise return SkipDir immediately, yielding an empty
 			// seenPaths and deactivating every document in the collection.
 			if path != canonicalRoot &&
-				(defaultIgnoreDirs[name] || ignoreSet[name] || (strings.HasPrefix(name, ".") && name != ".")) {
+				(defaultIgnoreDirs[name] || ignored(rel) || (strings.HasPrefix(name, ".") && name != ".")) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -152,6 +164,12 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 
 		ext := strings.ToLower(filepath.Ext(path))
 		if !allowedExts[ext] {
+			return nil
+		}
+
+		// Not recorded in seenPaths: a file that ignore rules start excluding
+		// is deactivated by the reconciliation below, like a deleted one.
+		if ignored(rel) {
 			return nil
 		}
 
@@ -165,29 +183,24 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 			return nil
 		}
 
-		relPath, err := filepath.Rel(canonicalRoot, path)
-		if err != nil {
-			return err
-		}
-
 		stats.FilesScanned++
-		seenPaths[relPath] = true
+		seenPaths[rel] = true
 
 		if idx.beforeRead != nil {
 			idx.beforeRead(path)
 		}
-		data, err := root.ReadFile(relPath)
+		data, err := root.ReadFile(rel)
 		if err == nil {
 			var info fs.FileInfo
 			if info, err = d.Info(); err == nil {
-				err = idx.indexFile(ctx, col, relPath, data, info.ModTime(), rangeRepairs[relPath], &stats)
+				err = idx.indexFile(ctx, col, rel, data, info.ModTime(), rangeRepairs[rel], &stats)
 			}
 		}
 		if err != nil {
-			err = fmt.Errorf("indexing %s: %w", relPath, err)
-			slog.Warn("failed to index file", "path", relPath, "error", err)
+			err = fmt.Errorf("indexing %s: %w", rel, err)
+			slog.Warn("failed to index file", "path", rel, "error", err)
 			fileErrs = append(fileErrs, err)
-			failedPaths = append(failedPaths, relPath)
+			failedPaths = append(failedPaths, rel)
 		}
 
 		return nil

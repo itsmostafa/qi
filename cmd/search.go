@@ -19,6 +19,7 @@ var (
 	searchSince      string
 	searchUntil      string
 	searchSort       string
+	searchPath       string
 )
 
 var searchCmd = &cobra.Command{
@@ -44,6 +45,7 @@ var searchCmd = &cobra.Command{
 			Since:      searchSince,
 			Until:      searchUntil,
 			Sort:       searchSort,
+			Path:       searchPath,
 		}
 		if err := validateSearchOpts(opts); err != nil {
 			return err
@@ -64,5 +66,6 @@ func init() {
 	searchCmd.Flags().StringVarP(&searchCollection, "collection", "c", "", "limit to a specific collection")
 	searchCmd.Flags().IntVarP(&searchTopK, "limit", "n", 10, "number of results to return")
 	searchCmd.Flags().IntVar(&searchPassages, "passages", 0, "additional supporting passages per document (0–5)")
+	searchCmd.Flags().StringVar(&searchPath, "path", "", "limit to document paths matching a glob (e.g. 'meetings/*')")
 	addRecencyFlags(searchCmd, &searchSince, &searchUntil, &searchSort)
 }

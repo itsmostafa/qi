@@ -36,7 +36,7 @@ collections:
     path: ~/notes
     description: Personal notes       # optional
     extensions: [.md, .txt]           # optional — omit to use text defaults (.md, .markdown, .txt, .text)
-    ignore: [.git, node_modules]      # optional
+    ignore: [.git, node_modules, "*.draft.md"]  # optional
 ```
 
 | Field | Required | Description |
@@ -45,7 +45,15 @@ collections:
 | `path` | yes | Directory to index; supports `~` and relative paths |
 | `description` | no | Human-readable label |
 | `extensions` | no | File extensions to index; omit to use built-in defaults (`.md .markdown .txt .text`) |
-| `ignore` | no | Directory/file names to skip during indexing |
+| `ignore` | no | Globs of directories and files to skip during indexing |
+
+Each `ignore` entry is a glob matched against a file's collection-relative
+path, its basename and every parent directory, so `node_modules` skips the
+directory anywhere in the tree, `drafts/*` skips everything under `drafts`, and
+`*.draft.md` skips those files at any depth. A plain name is still the exact
+match it has always been. Negation (`!`) and `.gitignore` files are not
+supported. Adding a pattern removes the files it now covers on the next
+`qi index`, the same way a deleted file is removed.
 
 Collection names are the directory's own name, so `/Users/alice/Projects/tools/qi` becomes `qi`. When two collections would share a name, both take on as many leading path segments as it takes to tell them apart: `~/work/notes` and `~/personal/notes` become `work-notes` and `personal-notes`, while unaffected collections keep their short names. Names that still collide, and duplicate canonical paths, are rejected at startup.
 

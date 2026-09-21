@@ -21,6 +21,7 @@ var (
 	querySince      string
 	queryUntil      string
 	querySort       string
+	queryPath       string
 )
 
 var queryCmd = &cobra.Command{
@@ -52,6 +53,7 @@ var queryCmd = &cobra.Command{
 			Since:      querySince,
 			Until:      queryUntil,
 			Sort:       querySort,
+			Path:       queryPath,
 		}
 		if err := validateSearchOpts(opts); err != nil {
 			return err
@@ -87,5 +89,6 @@ func init() {
 	queryCmd.Flags().StringVarP(&queryCollection, "collection", "c", "", "limit to a specific collection")
 	queryCmd.Flags().IntVarP(&queryTopK, "limit", "n", 10, "number of results to return")
 	queryCmd.Flags().IntVar(&queryPassages, "passages", 0, "additional supporting passages per document (0–5)")
+	queryCmd.Flags().StringVar(&queryPath, "path", "", "limit to document paths matching a glob (e.g. 'meetings/*')")
 	addRecencyFlags(queryCmd, &querySince, &queryUntil, &querySort)
 }

@@ -123,10 +123,18 @@ These are per-command, not global.
 | `--since YYYY-MM-DD` | Only documents dated on or after this day |
 | `--until YYYY-MM-DD` | Only documents dated on or before this day |
 | `--sort date` | Newest first instead of by relevance |
+| `--path <glob>` | Only documents whose collection-relative path matches the glob |
 
 Every document has a date. It comes from the frontmatter `timestamp:`, `date:`
 or `created:` when one of them parses, otherwise from the file's modification
 time — so no document is excluded from `--since`/`--until` for lack of a date.
+
+`--path` takes one glob in the same dialect as a collection's `ignore` list: it
+matches the path, its basename or any parent directory, so `meetings` and
+`meetings/*` both select `meetings/q3/retro.md` and `*.log.md` matches at any
+depth. Paths are relative to their collection, so without `-c` the glob is
+applied inside every collection. Scope is applied while candidates are still
+being ranked, so an in-scope hit is not lost behind out-of-scope ones.
 
 ---
 

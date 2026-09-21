@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/itsmostafa/qi/internal/config"
 	"github.com/itsmostafa/qi/internal/search"
 	"github.com/spf13/cobra"
 )
@@ -35,6 +36,11 @@ func validateSearchOpts(opts search.SearchOpts) error {
 	}
 	if err := checkDate("until", opts.Until); err != nil {
 		return err
+	}
+	if opts.Path != "" {
+		if err := config.ValidPattern(opts.Path); err != nil {
+			return fmt.Errorf("--path %q is not a valid glob: %w", opts.Path, err)
+		}
 	}
 	switch opts.Sort {
 	case "", "relevance", "date":

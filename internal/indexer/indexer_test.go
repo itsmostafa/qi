@@ -27,6 +27,9 @@ func makeTestCollection(t *testing.T, files map[string]string) config.Collection
 	dir := t.TempDir()
 	for name, content := range files {
 		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
 			t.Fatal(err)
 		}
