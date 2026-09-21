@@ -3,6 +3,8 @@ package search
 import (
 	"net/url"
 	"strings"
+
+	"github.com/itsmostafa/qi/internal/config"
 )
 
 // Passage is an additional matched chunk belonging to a search result.
@@ -74,5 +76,13 @@ type SearchOpts struct {
 	Since      string // YYYY-MM-DD, inclusive lower bound on document timestamp
 	Until      string // YYYY-MM-DD, inclusive upper bound
 	Sort       string // "" = relevance, "date" = newest first
+	Path       string // glob over the collection-relative document path
 	Passages   int    // additional matched chunks per result, capped at 5
+}
+
+// inScope reports whether a document path passes the caller's scope glob. It
+// is applied while candidates are still being collected, so an in-scope
+// document below a page of out-of-scope hits still reaches the result set.
+func inScope(pattern, docPath string) bool {
+	return pattern == "" || config.PathMatch(pattern, docPath)
 }

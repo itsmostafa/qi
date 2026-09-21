@@ -120,6 +120,9 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 		); err != nil {
 			return nil, err
 		}
+		if !inScope(opts.Path, r.Path) {
+			continue
+		}
 		r.SourceURI = SourceURI(r.Collection, r.Path)
 		if seenDoc[r.DocID] {
 			continue // a document is represented by its best-ranked chunk
