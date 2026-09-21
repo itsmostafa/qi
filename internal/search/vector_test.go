@@ -162,8 +162,16 @@ func TestVectorSearch_MetadataAndBoundedPassages(t *testing.T) {
 	if results[0].StartLine != 2 || results[0].EndLine != 3 {
 		t.Fatalf("primary range = %d-%d", results[0].StartLine, results[0].EndLine)
 	}
+	// Chunk text and document metadata are fetched after the scan, so a
+	// result carrying the wrong row's body would still rank correctly.
+	if results[0].Snippet != "nearest" || results[0].Title != "A" || results[0].HeadingPath != "Intro" {
+		t.Fatalf("primary content = %+v", results[0])
+	}
 	if len(results[0].Passages) != 1 || results[0].Passages[0].StartLine != 6 {
 		t.Fatalf("passages = %+v, want one bounded support", results[0].Passages)
+	}
+	if p := results[0].Passages[0]; p.Snippet != "support one" || p.HeadingPath != "Details" {
+		t.Fatalf("passage content = %+v", p)
 	}
 }
 

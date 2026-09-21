@@ -28,7 +28,7 @@ problem at all.
 
 ## Ranked recommendations
 
-### 1. Fix the vector scan — before touching Jev *(high confidence, code-verified)*
+### 1. Fix the vector scan — before touching Jev *(high confidence, code-verified)* — **implemented 2026-09-21**
 
 `internal/search/vector.go:57-77` issues one unbounded `SELECT` joining
 `chunk_vectors`/`chunks`/`documents`/`embeddings` across the whole active corpus, with no `LIMIT`,
@@ -42,6 +42,20 @@ on every query is pure waste: the snippet is needed for at most `topK` rows.
 The first fix is a SQL fix — stop selecting chunk text during the scan, fetch snippets only for
 the selected top-K — before any ANN or quantization work. Same-day, no dependency, orthogonal to
 the sqlite-vec/WASM blocker in CLAUDE.md. **Required regardless of whether Jev is ever integrated.**
+
+**Done.** The scan now selects `d.id, c.id, d.path, cv.vector` only — identity, the vector, and
+the path the scope glob needs before the per-document collapse — and `VectorSearch.hydrate`
+fetches chunk text and document metadata for the surviving top-K plus their passages in one
+batched `IN` query.
+
+Measured on a synthetic 4,000-chunk corpus, 20 queries at `topK=10` with 3 passages: **15.6 ms →
+10.1 ms** at 14.9 MiB of chunk text, **39.0 ms → 21.3 ms** at 59.5 MiB. The saving grows with
+corpus bytes, as predicted. Output is byte-identical before and after across hybrid queries with
+collection, `--path`, `--since` and `--sort date` filters on a real corpus.
+
+The scan roughly halves, but it does **not** become independent of corpus bytes: at a fixed 4,000
+vectors, quadrupling chunk text still takes the new path from 10.1 ms to 21.3 ms. Not selecting a
+column is not the same as not reading its row. See open question 2 for the untested hypothesis.
 
 ### 2. Build a local eval set *(this is the actual blocker)*
 
@@ -221,7 +235,7 @@ about retrieval quality.
 ## Open questions
 
 1. **Does *any* reranker improve on qi's BM25+dense+RRF baseline?** No evidence survived in either direction. Answerable only locally — see recommendation 2.
-2. **What is the actual scaling curve of qi's vector path?** How much per-query cost is the `c.text` materialization vs. the cosine math? Is a pure-Go HNSW/ANN library usable without CGo? Would int8 or binary quantization with full-precision rescoring remove the need for ANN entirely at qi's corpus sizes?
+2. **What is the actual scaling curve of qi's vector path?** The `c.text` materialization is gone (recommendation 1, implemented), yet the scan still grows with chunk text at a fixed vector count. Untested hypothesis: `chunks.text` is column 5 while `start_line`/`end_line` were appended by migration 007, so the scan's line-range predicate has to read past the large column — through the overflow chain on spilled rows — to reach them. A covering index on `chunks(id, doc_id, start_line, end_line)` would let the join skip the row entirely; that is a migration, so measure before writing it. Is a pure-Go HNSW/ANN library usable without CGo? Would int8 or binary quantization with full-precision rescoring remove the need for ANN entirely at qi's corpus sizes?
 3. **Is the monorepo goal a retrieval problem or an indexing problem?** qi indexes only Markdown and plaintext, with no AST or symbol awareness. Would tree-sitter/ctags symbol extraction plus gitignore-aware incremental reindexing deliver more than any reranker could?
 4. **Does packing K candidates into one Jev state degrade ranking vs. per-candidate fan-out?** The jaggedness page warns about context rot; the no-contamination claim was refuted; only a community project does the packing. A cheap A/B on a fixed shortlist would settle it and decide the adapter's shape.
 
