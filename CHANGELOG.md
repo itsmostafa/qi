@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.2.1](https://github.com/itsmostafa/qi/compare/v0.2.0...v0.2.1) (2026-09-21)
+
+
+### Features
+
+* **config:** add one glob dialect for path scoping ([d8bd744](https://github.com/itsmostafa/qi/commit/d8bd744111b0c4e43992f21ae5aeebc94be43d20))
+* consistent ignore globs and --path query scope ([7d08e99](https://github.com/itsmostafa/qi/commit/7d08e998307cb4bb0e11b302c6c7d32c7bf992d3))
+* **search:** add --path scope filter to search and query ([6d8f21f](https://github.com/itsmostafa/qi/commit/6d8f21ff047cb5f1dbdb034d93a367e95607b093))
+
+
+### Bug Fixes
+
+* **indexer:** apply ignore patterns to files, not just directories ([e1c2a81](https://github.com/itsmostafa/qi/commit/e1c2a81e8a54f79adb366e82bf39c5f1ff5e1072))
+
+
+### Performance Improvements
+
+* **search:** scan vectors lean and hydrate the top-K ([64d488c](https://github.com/itsmostafa/qi/commit/64d488cf040329dbbd43c705ee98d5d4bda00dbb))
+* **search:** scan vectors lean and hydrate the top-K ([b657d78](https://github.com/itsmostafa/qi/commit/b657d78f89927a2881e1baaac97e28204c4b5168))
+
+
+### Miscellaneous Chores
+
+* release 0.2.1 ([118260e](https://github.com/itsmostafa/qi/commit/118260e094de8532228004d07721b3dfc099548c))
+
 ## [0.2.0](https://github.com/itsmostafa/qi/compare/v0.1.0...v0.2.0) (2026-09-09)
 
 
