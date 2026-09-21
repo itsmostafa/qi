@@ -1,13 +1,15 @@
 package search
 
 import (
+	"cmp"
 	"context"
+	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
-	"sort"
-	"strings"
+	"slices"
 
 	"github.com/itsmostafa/qi/internal/db"
 )
@@ -32,13 +34,10 @@ type vecCandidate struct {
 	dist    float64
 }
 
-// hydrateBatch bounds one IN-clause fetch. The caller's limit is unbounded,
-// and SQLite refuses a statement carrying more variables than its maximum.
-const hydrateBatch = 500
-
 // Search returns up to topK results nearest to the query embedding.
 func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, topK int, opts SearchOpts) ([]Result, error) {
-	if err := validateVector(queryEmbedding); err != nil {
+	queryNorm, err := validateVector(queryEmbedding)
+	if err != nil {
 		return nil, fmt.Errorf("invalid query embedding: %w", err)
 	}
 	if topK <= 0 {
@@ -51,6 +50,86 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 		return nil, nil
 	}
 
+	// One snapshot for both reads. Ranking and hydration are separate
+	// statements, so without a transaction a concurrent `qi index` could
+	// deactivate or compact a document between them and the second read
+	// would answer from a database the first never saw.
+	tx, err := v.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("vector search transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	candidates, err := v.scanCandidates(ctx, tx, queryEmbedding, queryNorm, opts)
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(candidates, func(a, b vecCandidate) int {
+		return cmp.Compare(a.dist, b.dist)
+	})
+
+	// One chunk per document, for the same reason BM25 stops at poolSize
+	// distinct documents: a verbose file must not fill the pool with chunks
+	// that collapse to a single result later. Supporting passages are gathered
+	// only after this document pool is fixed.
+	selected := make([]vecCandidate, 0, topK)
+	primaryByDoc := make(map[int64]int64, topK)
+	for _, c := range candidates {
+		if _, seen := primaryByDoc[c.docID]; seen {
+			continue
+		}
+		primaryByDoc[c.docID] = c.chunkID
+		selected = append(selected, c)
+		if len(selected) >= topK {
+			break
+		}
+	}
+
+	limit := passageLimit(opts)
+	passagesByDoc := make(map[int64][]int64, len(selected))
+	if limit > 0 {
+		for _, c := range candidates {
+			primary, ok := primaryByDoc[c.docID]
+			if !ok || c.chunkID == primary || len(passagesByDoc[c.docID]) >= limit {
+				continue
+			}
+			passagesByDoc[c.docID] = append(passagesByDoc[c.docID], c.chunkID)
+		}
+	}
+
+	chunkIDs := make([]int64, 0, len(selected)*(1+limit))
+	for _, c := range selected {
+		chunkIDs = append(chunkIDs, c.chunkID)
+		chunkIDs = append(chunkIDs, passagesByDoc[c.docID]...)
+	}
+	hydrated, err := hydrate(ctx, tx, chunkIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]Result, 0, len(selected))
+	for _, c := range selected {
+		r, ok := hydrated[c.chunkID]
+		if !ok {
+			// Unreachable inside the snapshot; the map lookup still has to be
+			// answered, and an absent body must not become an empty result.
+			continue
+		}
+		r.Score = 1.0 / (1.0 + c.dist)
+		for _, id := range passagesByDoc[c.docID] {
+			if p, ok := hydrated[id]; ok {
+				r.Passages = append(r.Passages, passageOf(p))
+			}
+		}
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+// scanCandidates ranks every embedded chunk in scope against the query. It is
+// the only loop that runs once per chunk in the corpus, so it reads identity,
+// the vector, and the path the scope glob needs -- nothing else.
+func (v *VectorSearch) scanCandidates(ctx context.Context, tx *sql.Tx, queryEmbedding []float32, queryNorm float64, opts SearchOpts) ([]vecCandidate, error) {
 	var collectionFilter string
 	args := []any{v.fingerprint}
 	if opts.Collection != "" {
@@ -61,10 +140,6 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 	collectionFilter += dateFilter
 	args = append(args, dateArgs...)
 
-	// The scan selects only what ranking needs: identity, the vector, and the
-	// path the scope glob is matched against. Chunk text and document metadata
-	// are fetched afterwards for the handful of chunks that survive, so scan
-	// cost tracks vector count rather than total corpus bytes.
 	query := fmt.Sprintf(`
 		SELECT
 			d.id,
@@ -81,7 +156,7 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 		  %s
 	`, collectionFilter)
 
-	rows, err := v.db.QueryContext(ctx, query, args...)
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("vector search query: %w", err)
 	}
@@ -105,140 +180,44 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 			slog.Warn("skipping invalid stored vector", "chunk_id", c.chunkID, "error", err)
 			continue
 		}
-		c.dist = cosineDistance(queryEmbedding, deserializeFloat32(blob))
+		c.dist = cosineDistanceBlob(queryEmbedding, queryNorm, blob)
 		candidates = append(candidates, c)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	// The pool holds one connection, so the scan must be finished before
-	// hydration can issue its own query.
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-
-	// Sort by distance ascending (lower = more similar)
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].dist < candidates[j].dist
-	})
-
-	// One chunk per document, for the same reason BM25 stops at poolSize
-	// distinct documents: a verbose file must not fill the pool with chunks
-	// that collapse to a single result later. Supporting passages are gathered
-	// only after this document pool is fixed.
-	selected := make([]vecCandidate, 0, topK)
-	seenDoc := map[int64]bool{}
-	for _, c := range candidates {
-		if seenDoc[c.docID] {
-			continue
-		}
-		seenDoc[c.docID] = true
-		selected = append(selected, c)
-		if len(selected) >= topK {
-			break
-		}
-	}
-
-	var passages []vecCandidate
-	if limit := passageLimit(opts); limit > 0 {
-		primaryByDoc := make(map[int64]int64, len(selected))
-		counts := make(map[int64]int, len(selected))
-		for _, c := range selected {
-			primaryByDoc[c.docID] = c.chunkID
-		}
-		for _, c := range candidates {
-			primary, ok := primaryByDoc[c.docID]
-			if !ok || c.chunkID == primary || counts[c.docID] >= limit {
-				continue
-			}
-			passages = append(passages, c)
-			counts[c.docID]++
-		}
-	}
-
-	chunkIDs := make([]int64, 0, len(selected)+len(passages))
-	for _, c := range selected {
-		chunkIDs = append(chunkIDs, c.chunkID)
-	}
-	for _, c := range passages {
-		chunkIDs = append(chunkIDs, c.chunkID)
-	}
-	hydrated, err := v.hydrate(ctx, chunkIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	results := make([]Result, 0, len(selected))
-	indexByDoc := make(map[int64]int, len(selected))
-	for _, c := range selected {
-		r, ok := hydrated[c.chunkID]
-		if !ok {
-			// A concurrent `qi index` compaction hard-deleted the chunk
-			// between the scan and the fetch. Drop it rather than report a
-			// result with no content.
-			continue
-		}
-		r.Score = 1.0 / (1.0 + c.dist)
-		indexByDoc[c.docID] = len(results)
-		results = append(results, r)
-	}
-	for _, c := range passages {
-		r, ok := hydrated[c.chunkID]
-		if !ok {
-			continue
-		}
-		i, ok := indexByDoc[c.docID]
-		if !ok {
-			continue
-		}
-		results[i].Passages = append(results[i].Passages, Passage{
-			ChunkID: r.ChunkID, HeadingPath: r.HeadingPath, Snippet: r.Snippet,
-			StartLine: r.StartLine, EndLine: r.EndLine,
-		})
-	}
-	return results, nil
+	return candidates, rows.Err()
 }
 
 // hydrate fetches the metadata and chunk text the scan left behind, keyed by
-// chunk ID because the IN query returns rows in no particular order.
-func (v *VectorSearch) hydrate(ctx context.Context, chunkIDs []int64) (map[int64]Result, error) {
+// chunk ID because the query returns rows in no particular order. The IDs
+// travel as one JSON array rather than a placeholder list, so an unbounded
+// caller limit cannot run into SQLite's cap on bound variables.
+func hydrate(ctx context.Context, tx *sql.Tx, chunkIDs []int64) (map[int64]Result, error) {
 	hydrated := make(map[int64]Result, len(chunkIDs))
-	for start := 0; start < len(chunkIDs); start += hydrateBatch {
-		batch := chunkIDs[start:min(start+hydrateBatch, len(chunkIDs))]
-		placeholders := make([]string, len(batch))
-		args := make([]any, len(batch))
-		for i, id := range batch {
-			placeholders[i] = "?"
-			args[i] = id
-		}
-		query := fmt.Sprintf(`
-			SELECT
-				d.id,
-				c.id,
-				d.collection,
-				d.path,
-				d.content_hash,
-				COALESCE(d.title, d.path),
-				COALESCE(c.heading_path, ''),
-				COALESCE(c.start_line, 0),
-				COALESCE(c.end_line, 0),
-				COALESCE(d.doc_timestamp, ''),
-				c.text
-			FROM chunks c
-			JOIN documents d ON d.id = c.doc_id
-			WHERE c.id IN (%s)
-		`, strings.Join(placeholders, ","))
-		if err := v.scanHydrated(ctx, query, args, hydrated); err != nil {
-			return nil, err
-		}
+	if len(chunkIDs) == 0 {
+		return hydrated, nil
 	}
-	return hydrated, nil
-}
-
-func (v *VectorSearch) scanHydrated(ctx context.Context, query string, args []any, into map[int64]Result) error {
-	rows, err := v.db.QueryContext(ctx, query, args...)
+	ids, err := json.Marshal(chunkIDs)
 	if err != nil {
-		return fmt.Errorf("vector hydrate query: %w", err)
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT
+			d.id,
+			c.id,
+			d.collection,
+			d.path,
+			d.content_hash,
+			COALESCE(d.title, d.path),
+			COALESCE(c.heading_path, ''),
+			COALESCE(c.start_line, 0),
+			COALESCE(c.end_line, 0),
+			COALESCE(d.doc_timestamp, ''),
+			c.text
+		FROM chunks c
+		JOIN documents d ON d.id = c.doc_id
+		WHERE c.id IN (SELECT value FROM json_each(?))
+	`, string(ids))
+	if err != nil {
+		return nil, fmt.Errorf("vector hydrate query: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -248,58 +227,50 @@ func (v *VectorSearch) scanHydrated(ctx context.Context, query string, args []an
 			&r.Title, &r.HeadingPath, &r.StartLine, &r.EndLine,
 			&r.Timestamp, &r.Snippet,
 		); err != nil {
-			return err
+			return nil, err
 		}
 		r.SourceURI = SourceURI(r.Collection, r.Path)
-		into[r.ChunkID] = r
+		hydrated[r.ChunkID] = r
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	return rows.Close()
+	return hydrated, rows.Err()
 }
 
-func validateVector(v []float32) error {
+// validateVector rejects a query vector that cannot be scored against, and
+// returns its norm so the scan does not recompute it once per stored vector.
+func validateVector(v []float32) (float64, error) {
 	if len(v) == 0 {
-		return fmt.Errorf("empty vector")
+		return 0, fmt.Errorf("empty vector")
 	}
 	var norm float64
 	for i, value := range v {
 		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-			return fmt.Errorf("non-finite value at dimension %d", i)
+			return 0, fmt.Errorf("non-finite value at dimension %d", i)
 		}
 		norm += float64(value) * float64(value)
 	}
 	if norm == 0 {
-		return fmt.Errorf("zero-norm vector")
+		return 0, fmt.Errorf("zero-norm vector")
 	}
-	return nil
+	return math.Sqrt(norm), nil
 }
 
-// cosineDistance returns 1 - cosine_similarity (range [0, 2]).
-func cosineDistance(a, b []float32) float64 {
-	if len(a) != len(b) || len(a) == 0 {
+// cosineDistanceBlob returns 1 - cosine_similarity (range [0, 2]) against a
+// stored little-endian float32 blob. It decodes and scores in one pass: the
+// scan runs this once per embedded chunk in the corpus, so materializing a
+// []float32 per row cost an allocation and a second walk for nothing. The
+// query norm is the same for every row and is computed once by the caller.
+func cosineDistanceBlob(query []float32, queryNorm float64, blob []byte) float64 {
+	if queryNorm == 0 || len(blob) != len(query)*4 {
 		return 2.0
 	}
-	var dot, normA, normB float64
-	for i := range a {
-		ai, bi := float64(a[i]), float64(b[i])
-		dot += ai * bi
-		normA += ai * ai
-		normB += bi * bi
+	var dot, norm float64
+	for i, q := range query {
+		stored := float64(math.Float32frombits(binary.LittleEndian.Uint32(blob[i*4:])))
+		dot += float64(q) * stored
+		norm += stored * stored
 	}
-	if normA == 0 || normB == 0 {
+	if norm == 0 {
 		return 2.0
 	}
-	return 1.0 - dot/(math.Sqrt(normA)*math.Sqrt(normB))
-}
-
-// deserializeFloat32 decodes little-endian bytes to float32 slice.
-func deserializeFloat32(b []byte) []float32 {
-	v := make([]float32, len(b)/4)
-	for i := range v {
-		bits := binary.LittleEndian.Uint32(b[i*4:])
-		v[i] = math.Float32frombits(bits)
-	}
-	return v
+	return 1.0 - dot/(queryNorm*math.Sqrt(norm))
 }

@@ -55,12 +55,6 @@ func ReciprocalRankFusion(bm25 []Result, vec []Result, k int, maxPassages int) [
 		evidenceIDs map[int64]bool
 	}
 
-	primaryPassage := func(r Result) Passage {
-		return Passage{
-			ChunkID: r.ChunkID, HeadingPath: r.HeadingPath, Snippet: r.Snippet,
-			StartLine: r.StartLine, EndLine: r.EndLine,
-		}
-	}
 	addEvidence := func(s *score, passages ...Passage) {
 		if passageCap == 0 {
 			return
@@ -92,7 +86,7 @@ func ReciprocalRankFusion(bm25 []Result, vec []Result, k int, maxPassages int) [
 			bm25Sc:   r.Score,
 		}
 		byDoc[r.DocID] = s
-		addEvidence(s, primaryPassage(r))
+		addEvidence(s, passageOf(r))
 		addEvidence(s, r.Passages...)
 	}
 
@@ -110,7 +104,7 @@ func ReciprocalRankFusion(bm25 []Result, vec []Result, k int, maxPassages int) [
 			// contradicts the ranks reported beside it.
 			s.result = r
 		}
-		addEvidence(s, primaryPassage(r))
+		addEvidence(s, passageOf(r))
 		addEvidence(s, r.Passages...)
 		s.rrfScore += 1.0 / float64(k+rank)
 		s.vecRank = rank

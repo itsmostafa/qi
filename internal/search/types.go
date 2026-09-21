@@ -16,6 +16,14 @@ type Passage struct {
 	EndLine     int    `json:"end_line"`
 }
 
+// passageOf projects a result's own chunk into a supporting passage.
+func passageOf(r Result) Passage {
+	return Passage{
+		ChunkID: r.ChunkID, HeadingPath: r.HeadingPath, Snippet: r.Snippet,
+		StartLine: r.StartLine, EndLine: r.EndLine,
+	}
+}
+
 // SourceURI returns a stable, URL-escaped source identity for a path in a
 // collection. Slashes delimit path segments; characters within a segment are
 // escaped using net/url semantics.
