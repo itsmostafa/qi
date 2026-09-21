@@ -436,6 +436,13 @@ func (c *Config) validate() error {
 		if seen[col.Name] {
 			return fmt.Errorf("duplicate collection name %q", col.Name)
 		}
+		for _, pattern := range col.Ignore {
+			// A malformed glob matches nothing, so the files it was meant to
+			// exclude would be indexed silently.
+			if err := ValidPattern(pattern); err != nil {
+				return fmt.Errorf("collection %q ignore pattern %q is not a valid glob: %w", col.Name, pattern, err)
+			}
+		}
 		seen[col.Name] = true
 		canonical := canonicalPath(col.Path)
 		if existing, ok := seenPaths[canonical]; ok {

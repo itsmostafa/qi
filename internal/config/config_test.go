@@ -224,6 +224,17 @@ collections:
 	}
 }
 
+func TestLoad_RejectsMalformedIgnoreGlob(t *testing.T) {
+	_, err := Load(writeTempConfig(t, `
+collections:
+  - path: /tmp
+    ignore: ["drafts/["]
+`))
+	if err == nil || !strings.Contains(err.Error(), "not a valid glob") {
+		t.Fatalf("expected a malformed glob error, got %v", err)
+	}
+}
+
 func TestAddCollectionNormalizesSamePathLegacyName(t *testing.T) {
 	dir := t.TempDir()
 	collectionPath := filepath.Join(dir, "foo bar")
