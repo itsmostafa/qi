@@ -44,14 +44,19 @@ the selected top-K — before any ANN or quantization work. Same-day, no depende
 the sqlite-vec/WASM blocker in CLAUDE.md. **Required regardless of whether Jev is ever integrated.**
 
 **Done.** The scan now selects `d.id, c.id, d.path, cv.vector` only — identity, the vector, and
-the path the scope glob needs before the per-document collapse — and `VectorSearch.hydrate`
-fetches chunk text and document metadata for the surviving top-K plus their passages in one
-batched `IN` query.
+the path the scope glob needs before the per-document collapse — and `hydrate` fetches chunk text
+and document metadata for the surviving top-K plus their passages in one query, passing the chunk
+IDs as a single JSON array to `json_each`. Both reads run inside one `BeginTx` snapshot, so
+ranking and hydration cannot see different corpora.
 
 Measured on a synthetic 4,000-chunk corpus, 20 queries at `topK=10` with 3 passages: **15.6 ms →
 10.1 ms** at 14.9 MiB of chunk text, **39.0 ms → 21.3 ms** at 59.5 MiB. The saving grows with
-corpus bytes, as predicted. Output is byte-identical before and after across hybrid queries with
-collection, `--path`, `--since` and `--sort date` filters on a real corpus.
+corpus bytes, as predicted. A later review pass fused blob decoding into the distance loop and
+hoisted the query norm out of it, worth a further **32.4 ms → 29.7 ms (~8%)** at 3,000 chunks ×
+768 dimensions — well short of the 3× that pass projected, because `ValidateEmbeddingBlob` still
+walks each vector and `database/sql` still boxes every row. Those two are the next lever. Output
+is byte-identical to the pre-change binary across hybrid queries with collection, `--path`,
+`--since` and `--sort date` filters on a real corpus.
 
 The scan roughly halves, but it does **not** become independent of corpus bytes: at a fixed 4,000
 vectors, quadrupling chunk text still takes the new path from 10.1 ms to 21.3 ms. Not selecting a
@@ -235,9 +240,10 @@ about retrieval quality.
 ## Open questions
 
 1. **Does *any* reranker improve on qi's BM25+dense+RRF baseline?** No evidence survived in either direction. Answerable only locally — see recommendation 2.
-2. **What is the actual scaling curve of qi's vector path?** The `c.text` materialization is gone (recommendation 1, implemented), yet the scan still grows with chunk text at a fixed vector count. Untested hypothesis: `chunks.text` is column 5 while `start_line`/`end_line` were appended by migration 007, so the scan's line-range predicate has to read past the large column — through the overflow chain on spilled rows — to reach them. A covering index on `chunks(id, doc_id, start_line, end_line)` would let the join skip the row entirely; that is a migration, so measure before writing it. Is a pure-Go HNSW/ANN library usable without CGo? Would int8 or binary quantization with full-precision rescoring remove the need for ANN entirely at qi's corpus sizes?
+2. **What is the actual scaling curve of qi's vector path?** The `c.text` materialization is gone (recommendation 1, implemented), yet the scan still grows with chunk text at a fixed vector count. Untested hypothesis: `chunks.text` is column 5 while `start_line`/`end_line` were appended by migration 007, so the scan's line-range predicate has to read past the large column — through the overflow chain on spilled rows — to reach them. `EXPLAIN QUERY PLAN` on a copy of the local database confirms the shape: with `CREATE INDEX idx_chunks_scan ON chunks(doc_id, start_line, end_line)` the lean scan reports `SEARCH c USING COVERING INDEX` and never reads the table, while the *old* SELECT including `c.text` reports a plain `SEARCH c USING INDEX` and the table read returns. The index is therefore inert until chunk text leaves the scan — this change is its prerequisite, not its alternative. `id` is the rowid and is implicit, so it does not belong in the index. The covering plan also flips `d` to `SCAN d`, so measure on a real corpus before writing migration `008`. Is a pure-Go HNSW/ANN library usable without CGo? Would int8 or binary quantization with full-precision rescoring remove the need for ANN entirely at qi's corpus sizes?
 3. **Is the monorepo goal a retrieval problem or an indexing problem?** qi indexes only Markdown and plaintext, with no AST or symbol awareness. Would tree-sitter/ctags symbol extraction plus gitignore-aware incremental reindexing deliver more than any reranker could?
-4. **Does packing K candidates into one Jev state degrade ranking vs. per-candidate fan-out?** The jaggedness page warns about context rot; the no-contamination claim was refuted; only a community project does the packing. A cheap A/B on a fixed shortlist would settle it and decide the adapter's shape.
+4. **Should `bm25.go` pass its IN-clause IDs through `json_each` too?** The vector hydrate now does, which removed its placeholder loop and its bind-variable cap. `internal/search/bm25.go` still builds a placeholder list in `addPassages` with no cap at all. Mechanical to convert; no measured reason to yet.
+5. **Does packing K candidates into one Jev state degrade ranking vs. per-candidate fan-out?** The jaggedness page warns about context rot; the no-contamination claim was refuted; only a community project does the packing. A cheap A/B on a fixed shortlist would settle it and decide the adapter's shape.
 
 ---
 
