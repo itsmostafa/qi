@@ -41,7 +41,7 @@ func TestEmbeddingHealthClassifiesAllStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if health != (EmbeddingHealth{Current: 1, Missing: 1, Stale: 1, Orphaned: 4}) {
+	if health != (EmbeddingHealth{Current: 1, Missing: 1, Stale: 1, Orphaned: 1, Corrupt: 3}) {
 		t.Fatalf("unexpected health: %+v", health)
 	}
 }
