@@ -294,6 +294,8 @@ func TestPlanHookRun(t *testing.T) {
 		{Name: "handbook", Path: filepath.Join(repo, "handbook")},
 		{Name: "elsewhere", Path: t.TempDir()},
 		{Name: "sibling", Path: sibling},
+		// Deleted by a pull: skipped, or it would fail the other collections' run.
+		{Name: "removed", Path: filepath.Join(repo, "removed")},
 	}}
 	wantPaths := []string{filepath.Join(canonicalRepo, "docs"), filepath.Join(canonicalRepo, "handbook")}
 	load := func() (*config.Config, error) { return cfg, nil }

@@ -111,6 +111,12 @@ func (p *adocParser) Parse(path string, data []byte) (*Document, error) {
 		if adocLineComment(t) {
 			continue
 		}
+		// A delimited block (a //// comment, say) ends the header; taken as
+		// an author line, its closing delimiter would open a block that
+		// swallows the rest of the document.
+		if _, ok := adocDelimiter(t); ok {
+			break
+		}
 		name, value, ok := adocAttribute(t)
 		if !ok {
 			// Author and revision lines follow the title directly.

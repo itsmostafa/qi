@@ -82,6 +82,7 @@ type Indexer struct {
 	// everything already indexed.
 	Force      bool
 	beforeRead func(string) // test hook; called after discovery, before secure open
+	runStart   time.Time    // start of the current Index call; see fileStat
 }
 
 func New(database *db.DB, chunkSize int) *Indexer {
@@ -94,6 +95,7 @@ func New(database *db.DB, chunkSize int) *Indexer {
 // Index indexes all files in a collection.
 func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, error) {
 	start := time.Now()
+	idx.runStart = start
 	stats := Stats{}
 
 	// Detect legacy ranges once per collection, not once per unchanged file.
@@ -415,11 +417,20 @@ func sqliteVarint(b []byte) (uint64, int) {
 	return v<<8 | uint64(b[8]), 9
 }
 
+// racyWindow covers filesystems that store mtimes coarsely (FAT keeps 2s).
+const racyWindow = 2 * time.Second
+
 // fileStat is the change signature stored in documents.file_stat. Size plus
 // nanosecond mtime is what git and make trust; --force covers a writer that
-// preserves both.
-func fileStat(info fs.FileInfo) string {
-	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+// preserves both. Like git's racy-index check, an mtime within racyWindow of
+// the run's start is not trusted: a same-size write in the same clock tick as
+// the read would otherwise carry the stat of the bytes read, and every later
+// run would skip it. Such a file gets no stat and is read again next run.
+func (idx *Indexer) fileStat(info fs.FileInfo) sql.NullString {
+	if !info.ModTime().Before(idx.runStart.Add(-racyWindow)) {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano()), Valid: true}
 }
 
 // indexFile brings one file's document up to date. read is only called when
@@ -441,8 +452,8 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	// date and the mtime fallback date are all unchanged, so skip the read. A
 	// no-op run over a large tree then costs a walk, not a read and SHA-256 of
 	// every indexed byte.
-	stat := fileStat(info)
-	if existingActive == 1 && existingStat.Valid && existingStat.String == stat &&
+	stat := idx.fileStat(info)
+	if existingActive == 1 && stat.Valid && existingStat == stat &&
 		existingTime.Valid && !idx.Force && !rangeRepairRequired {
 		return nil
 	}
@@ -456,7 +467,7 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	// recordStat stores the stat of a document whose indexed content is
 	// current, so the next run can skip reading it.
 	recordStat := func() error {
-		if existingStat.Valid && existingStat.String == stat {
+		if existingStat == stat {
 			return nil
 		}
 		if _, err := idx.db.ExecContext(ctx, `UPDATE documents SET file_stat=? WHERE id=?`, stat, docID); err != nil {

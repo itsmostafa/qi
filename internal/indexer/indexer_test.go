@@ -478,7 +478,8 @@ func TestIndexer_SkipsOversizeFile(t *testing.T) {
 }
 
 // A file whose size and mtime match what was indexed is not read again; a
-// changed mtime is enough to read it.
+// changed mtime is enough to read it. An mtime as recent as the run is not
+// trusted, since a same-size write in the same clock tick keeps the stat.
 func TestIndexer_SkipsReadWhenStatUnchanged(t *testing.T) {
 	database := openTestDB(t)
 	dir := t.TempDir()
@@ -491,25 +492,35 @@ func TestIndexer_SkipsReadWhenStatUnchanged(t *testing.T) {
 	reads := 0
 	idx.beforeRead = func(string) { reads++ }
 	ctx := context.Background()
+	index := func() {
+		t.Helper()
+		if _, err := idx.Index(ctx, col); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setMtime := func(mtime time.Time) {
+		t.Helper()
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	if _, err := idx.Index(ctx, col); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := idx.Index(ctx, col); err != nil {
-		t.Fatal(err)
-	}
-	if reads != 1 {
-		t.Fatalf("unchanged file was read again: %d reads over two runs", reads)
-	}
-
-	later := time.Now().Add(time.Hour)
-	if err := os.Chtimes(path, later, later); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := idx.Index(ctx, col); err != nil {
-		t.Fatal(err)
-	}
+	index()
+	index()
 	if reads != 2 {
+		t.Fatalf("file modified during the run was trusted: %d reads over two runs", reads)
+	}
+
+	setMtime(time.Now().Add(-time.Hour))
+	index()
+	index()
+	if reads != 3 {
+		t.Fatalf("unchanged file was read again: %d reads, want 3", reads)
+	}
+
+	setMtime(time.Now().Add(-30 * time.Minute))
+	index()
+	if reads != 4 {
 		t.Fatalf("file with a new mtime was not re-read: %d reads", reads)
 	}
 }

@@ -28,7 +28,15 @@ func splitRawLines(data []byte) []rawLine {
 	return out
 }
 
-func (l rawLine) text(data []byte) string { return string(data[l.start:l.end]) }
+// text is the line's content. A UTF-8 byte order mark before the first line
+// is dropped, or it would hide a title or header on that line.
+func (l rawLine) text(data []byte) string {
+	t := string(data[l.start:l.end])
+	if l.start == 0 {
+		t = strings.TrimPrefix(t, "\ufeff")
+	}
+	return t
+}
 
 // lineSections builds sections for line-oriented markup (reStructuredText,
 // AsciiDoc) whose body text is kept as source. Body lines are copied verbatim
@@ -39,6 +47,7 @@ type lineSections struct {
 	mapper       sourceMapper
 	sections     []Section
 	path         []string
+	levels       []int // levels[i] is the heading level of path[i]
 	buf          mappedBuilder
 	headings     []string
 	headingSpans []SourceSpan
@@ -62,10 +71,12 @@ func (s *lineSections) heading(level int, title string, span SourceSpan) {
 	if level < 1 {
 		level = 1
 	}
-	if level-1 < len(s.path) {
-		s.path = s.path[:level-1]
+	// Pop by level, not depth: with levels skipped (a document that starts
+	// at "=="), a later sibling must not nest under the previous one.
+	for len(s.levels) > 0 && s.levels[len(s.levels)-1] >= level {
+		s.path, s.levels = s.path[:len(s.path)-1], s.levels[:len(s.levels)-1]
 	}
-	s.path = append(s.path, title)
+	s.path, s.levels = append(s.path, title), append(s.levels, level)
 	if title != "" {
 		s.headings = append(s.headings, title)
 		s.headingSpans = append(s.headingSpans, span)

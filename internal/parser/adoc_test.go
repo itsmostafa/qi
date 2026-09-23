@@ -99,3 +99,30 @@ func TestAdocWithoutHeader(t *testing.T) {
 		t.Errorf("sections = %v", got)
 	}
 }
+
+// A comment block right after the title is not an author line; taken as one,
+// its closing delimiter opened a block that dropped the rest of the document.
+func TestAdocCommentBlockEndsHeader(t *testing.T) {
+	doc := parseWith(t, "g.adoc", "= T\n////\nx\n////\n:keywords: a\n\nuniquebodytoken\n")
+	if body := bodyText(doc); !strings.Contains(body, "uniquebodytoken") {
+		t.Fatalf("body lost after a header comment block:\n%s", body)
+	}
+}
+
+func TestAdocByteOrderMark(t *testing.T) {
+	doc := parseWith(t, "g.adoc", "\xef\xbb\xbf= Title\n:keywords: a, b\n\nBody\n")
+	if doc.Title != "Title" || len(doc.Meta.Tags) != 2 {
+		t.Fatalf("Title = %q, Tags = %v", doc.Title, doc.Meta.Tags)
+	}
+}
+
+// Without a level-0 title, a later "==" sibling must not nest under the
+// previous one's "===" child.
+func TestAdocSkippedLevelSiblings(t *testing.T) {
+	doc := parseWith(t, "g.adoc", "== A\n\na\n\n=== B\n\nb\n\n== C\n\nc\n")
+	for _, s := range doc.Sections {
+		if strings.TrimSpace(s.Text) == "c" && s.HeadingPath != "C" {
+			t.Fatalf("heading path of c = %q, want C", s.HeadingPath)
+		}
+	}
+}

@@ -106,3 +106,10 @@ func TestRSTHeadingOnlyDocumentIsSearchable(t *testing.T) {
 		t.Fatalf("sections = %+v", doc.Sections)
 	}
 }
+
+func TestRSTByteOrderMark(t *testing.T) {
+	doc := parseWith(t, "a.rst", "\xef\xbb\xbfTitle\n=====\n\nBody\n")
+	if doc.Title != "Title" {
+		t.Fatalf("Title = %q", doc.Title)
+	}
+}

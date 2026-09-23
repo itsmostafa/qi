@@ -273,6 +273,11 @@ func planHookRun(ctx context.Context, hook string, args []string, repoDir string
 		if err != nil {
 			continue
 		}
+		// A pull that deleted a collection's directory must not fail the run
+		// for every other collection in the worktree.
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
 		if pathWithin(p, plan.TopLevel) && !slices.Contains(plan.Paths, p) {
 			plan.Paths = append(plan.Paths, p)
 		}
