@@ -189,18 +189,28 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 			return nil
 		}
 
+		info, err := d.Info()
+		// Too large to index is a property of the file, not a failure: one
+		// generated dump or log in a large tree would otherwise fail every run.
+		// Not recorded in seenPaths, so a document whose file grew past the
+		// cap is deactivated rather than left serving stale text.
+		if err == nil && info.Size() > maxFileSize {
+			slog.Warn("skipping file over the size limit", "path", rel, "bytes", info.Size(), "limit", maxFileSize)
+			stats.FilesSkipped++
+			return nil
+		}
+
 		stats.FilesScanned++
 		seenPaths[rel] = true
 
-		if idx.beforeRead != nil {
-			idx.beforeRead(path)
-		}
-		data, err := root.ReadFile(rel)
 		if err == nil {
-			var info fs.FileInfo
-			if info, err = d.Info(); err == nil {
-				err = idx.indexFile(ctx, col, rel, data, info.ModTime(), rangeRepairs[rel], &stats)
+			read := func() ([]byte, error) {
+				if idx.beforeRead != nil {
+					idx.beforeRead(path)
+				}
+				return root.ReadFile(rel)
 			}
+			err = idx.indexFile(ctx, col, rel, info, read, rangeRepairs[rel], &stats)
 		}
 		if err != nil {
 			err = fmt.Errorf("indexing %s: %w", rel, err)
@@ -292,16 +302,16 @@ func (idx *Indexer) compact(ctx context.Context) error {
 		return fmt.Errorf("pruning orphaned content: %w", err)
 	}
 
-	// Every indexFile commit writes a new FTS5 segment, and automerge keeps the
-	// segment count logarithmic — but a replaced chunk's postings stay in the
-	// segment that first held them until a merge reaches it, and the big bottom
-	// segment is only reached by an optimize. Without one, reindex cycles grew
-	// the index without bound (27 MiB of index for 241 chunks, in the case that
-	// prompted this). optimize rewrites the whole index, though, so running it
-	// every time made a 10-file run pay for the entire corpus. Run it only once
-	// the pages written since the last one reach a quarter of the largest
-	// segment: the index stays within about 1.25x of its optimized size, and
-	// the rewrite is amortized over changes worth a quarter of the corpus.
+	// Removed text needs no optimize: chunks_fts has secure-delete on
+	// (migration 008), so deleting a chunk removes its entries from the
+	// segment that holds them rather than writing a delete marker that only
+	// an optimize would purge. What remains is segment count: every indexFile
+	// commit writes a new segment, automerge keeps the count logarithmic, and
+	// the big bottom segment is only merged by an optimize. optimize rewrites
+	// the whole index, so running it every time made a 10-file run pay for the
+	// entire corpus. Run it only once the pages written since the last one
+	// reach a quarter of the largest segment, amortizing the rewrite over
+	// changes worth a quarter of the corpus.
 	largest, rest, err := ftsSegmentPages(ctx, idx.db.DB)
 	if err != nil {
 		slog.Warn("reading fts structure; optimizing unconditionally", "error", err)
@@ -405,24 +415,58 @@ func sqliteVarint(b []byte) (uint64, int) {
 	return v<<8 | uint64(b[8]), 9
 }
 
-func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPath string, data []byte, modTime time.Time, rangeRepairRequired bool, stats *Stats) error {
-	hash := sha256sum(data)
+// fileStat is the change signature stored in documents.file_stat. Size plus
+// nanosecond mtime is what git and make trust; --force covers a writer that
+// preserves both.
+func fileStat(info fs.FileInfo) string {
+	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+}
 
+// indexFile brings one file's document up to date. read is only called when
+// the file's size or mtime differs from what was recorded when it was indexed.
+func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPath string, info fs.FileInfo, read func() ([]byte, error), rangeRepairRequired bool, stats *Stats) error {
 	// Check if document exists (active or deactivated) and whether content changed
 	var existingHash string
 	var docID int64
 	var existingActive int
-	var existingTime sql.NullString
+	var existingTime, existingStat sql.NullString
 	row := idx.db.QueryRowContext(ctx,
-		`SELECT id, content_hash, active, doc_timestamp FROM documents WHERE collection=? AND path=?`,
+		`SELECT id, content_hash, active, doc_timestamp, file_stat FROM documents WHERE collection=? AND path=?`,
 		col.Name, relPath)
-	if err := row.Scan(&docID, &existingHash, &existingActive, &existingTime); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := row.Scan(&docID, &existingHash, &existingActive, &existingTime, &existingStat); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("looking up existing document: %w", err)
+	}
+
+	// Same size and mtime as when it was indexed: the bytes, the frontmatter
+	// date and the mtime fallback date are all unchanged, so skip the read. A
+	// no-op run over a large tree then costs a walk, not a read and SHA-256 of
+	// every indexed byte.
+	stat := fileStat(info)
+	if existingActive == 1 && existingStat.Valid && existingStat.String == stat &&
+		existingTime.Valid && !idx.Force && !rangeRepairRequired {
+		return nil
+	}
+
+	data, err := read()
+	if err != nil {
+		return err
+	}
+	hash := sha256sum(data)
+	modTime := info.ModTime()
+	// recordStat stores the stat of a document whose indexed content is
+	// current, so the next run can skip reading it.
+	recordStat := func() error {
+		if existingStat.Valid && existingStat.String == stat {
+			return nil
+		}
+		if _, err := idx.db.ExecContext(ctx, `UPDATE documents SET file_stat=? WHERE id=?`, stat, docID); err != nil {
+			return fmt.Errorf("recording file stat: %w", err)
+		}
+		return nil
 	}
 
 	var doc *parser.Document
 	var chunks []chunker.Chunk
-	var err error
 	if existingActive == 1 && existingHash == hash && !idx.Force {
 		// Unchanged bytes still need their date rechecked. Two rows land here:
 		// one indexed before dates existed, holding a NULL that no --since or
@@ -438,7 +482,7 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 		// ponytail: parses every frontmatter-dated file each run; export a
 		// frontmatter-only date reader from parser if index time starts to hurt.
 		if !rangeRepairRequired && existingTime.Valid && existingTime.String == documentDate("", modTime) {
-			return nil // unchanged
+			return recordStat() // unchanged
 		}
 		doc, err = parser.For(strings.ToLower(filepath.Ext(relPath))).Parse(relPath, data)
 		if err != nil {
@@ -457,11 +501,11 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 		docDate := documentDate(doc.Meta.Timestamp, modTime)
 		if !rangeRepairRequired {
 			if docDate == existingTime.String {
-				return nil // frontmatter still supplies the date; mtime is irrelevant
+				return recordStat() // frontmatter still supplies the date; mtime is irrelevant
 			}
 			if _, err := idx.db.ExecContext(ctx,
-				`UPDATE documents SET doc_timestamp=? WHERE id=?`,
-				docDate, docID); err != nil {
+				`UPDATE documents SET doc_timestamp=?, file_stat=? WHERE id=?`,
+				docDate, stat, docID); err != nil {
 				return fmt.Errorf("updating document date: %w", err)
 			}
 			return nil
@@ -476,7 +520,7 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	// rebuilt instead.
 	if docID != 0 && existingActive == 0 && existingHash == hash && existingTime.Valid && !idx.Force && !rangeRepairRequired {
 		if _, err := idx.db.ExecContext(ctx,
-			`UPDATE documents SET active=1, updated_at=datetime('now') WHERE id=?`, docID); err != nil {
+			`UPDATE documents SET active=1, file_stat=?, updated_at=datetime('now') WHERE id=?`, stat, docID); err != nil {
 			return fmt.Errorf("reactivating document: %w", err)
 		}
 		stats.FilesAdded++
@@ -527,9 +571,9 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	if docID == 0 {
 		// Insert
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO documents(collection, path, title, content_hash, doc_timestamp, tags, active, indexed_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
-			col.Name, relPath, title, hash, docTime, tagsJSON)
+			`INSERT INTO documents(collection, path, title, content_hash, doc_timestamp, tags, file_stat, active, indexed_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
+			col.Name, relPath, title, hash, docTime, tagsJSON, stat)
 		if err != nil {
 			return fmt.Errorf("inserting document: %w", err)
 		}
@@ -538,8 +582,8 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	} else {
 		// Update (or reactivate a previously deactivated document)
 		_, err = tx.ExecContext(ctx,
-			`UPDATE documents SET title=?, content_hash=?, doc_timestamp=?, tags=?, active=1, updated_at=datetime('now') WHERE id=?`,
-			title, hash, docTime, tagsJSON, docID)
+			`UPDATE documents SET title=?, content_hash=?, doc_timestamp=?, tags=?, file_stat=?, active=1, updated_at=datetime('now') WHERE id=?`,
+			title, hash, docTime, tagsJSON, stat, docID)
 		if err != nil {
 			return fmt.Errorf("updating document: %w", err)
 		}

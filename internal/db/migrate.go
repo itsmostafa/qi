@@ -133,6 +133,7 @@ var addedColumns = map[int]struct{ table, column string }{
 	4: {"embeddings", "fingerprint"},
 	6: {"documents", "tags"},
 	7: {"chunks", "end_line"},
+	9: {"documents", "file_stat"},
 }
 
 func columnExists(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {

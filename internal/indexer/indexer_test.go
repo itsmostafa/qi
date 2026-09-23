@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/itsmostafa/qi/internal/config"
 	"github.com/itsmostafa/qi/internal/db"
@@ -437,32 +438,79 @@ func TestIndexer_DeactivatesMissingFiles(t *testing.T) {
 }
 
 // One 50 MiB file peaked at ~543 MiB RSS; maxFileSize keeps it out entirely.
-func TestIndexer_RejectsOversizeFile(t *testing.T) {
+// Oversize is a property of the file, not a failure, so the run still succeeds
+// — one generated dump in a large tree must not fail every index run — and a
+// document whose file grows past the cap is deactivated, not left stale.
+func TestIndexer_SkipsOversizeFile(t *testing.T) {
 	database := openTestDB(t)
 	dir := t.TempDir()
-	f, err := os.Create(filepath.Join(dir, "big.md"))
-	if err != nil {
+	path := filepath.Join(dir, "big.md")
+	if err := os.WriteFile(path, []byte("# Big\n\nsmall for now\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Sparse: the cap is checked from the size, nothing is read.
-	if err := f.Truncate(maxFileSize + 1); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-
 	col := config.Collection{Name: "test", Path: dir, Extensions: []string{".md"}}
-	_, err = New(database, 256).Index(context.Background(), col)
-	if err == nil || !strings.Contains(err.Error(), "over the") {
-		t.Fatalf("expected an over-the-limit error, got %v", err)
+	idx := New(database, 256)
+	ctx := context.Background()
+	if _, err := idx.Index(ctx, col); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sparse: the cap is checked from the size, nothing is read.
+	if err := os.Truncate(path, maxFileSize+1); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := idx.Index(ctx, col)
+	if err != nil {
+		t.Fatalf("an oversize file must not fail the run: %v", err)
+	}
+	if stats.FilesSkipped != 1 || stats.FilesRemoved != 1 {
+		t.Errorf("expected the file skipped and its document removed, got %+v", stats)
 	}
 
 	var docs int
-	if err := database.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM documents`).Scan(&docs); err != nil {
+	if err := database.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM documents WHERE active = 1`).Scan(&docs); err != nil {
 		t.Fatal(err)
 	}
 	if docs != 0 {
-		t.Errorf("oversize file was indexed anyway (%d documents)", docs)
+		t.Errorf("oversize file is still searchable (%d active documents)", docs)
+	}
+}
+
+// A file whose size and mtime match what was indexed is not read again; a
+// changed mtime is enough to read it.
+func TestIndexer_SkipsReadWhenStatUnchanged(t *testing.T) {
+	database := openTestDB(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(path, []byte("# A\n\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	col := config.Collection{Name: "test", Path: dir, Extensions: []string{".md"}}
+	idx := New(database, 256)
+	reads := 0
+	idx.beforeRead = func(string) { reads++ }
+	ctx := context.Background()
+
+	if _, err := idx.Index(ctx, col); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := idx.Index(ctx, col); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 1 {
+		t.Fatalf("unchanged file was read again: %d reads over two runs", reads)
+	}
+
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := idx.Index(ctx, col); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 2 {
+		t.Fatalf("file with a new mtime was not re-read: %d reads", reads)
 	}
 }
 
@@ -485,6 +533,11 @@ func TestIndexer_NamesStaleActiveDocumentsAfterReadFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Change it too: an unreadable file whose size and mtime still match is
+	// skipped without a read, and its indexed content is still current.
+	if err := os.WriteFile(path, []byte("# A\n\nrewritten body\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chmod(path, 0o000); err != nil {
 		t.Fatal(err)
 	}
