@@ -82,7 +82,19 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 		vecTopK = opts.TopK
 	}
 
-	vecResults, err := h.vector.Search(ctx, queryVec, vecTopK, opts)
+	var vecResults []Result
+	if len(bm25Results) > 0 {
+		var docIDs []int64
+		docIDs, err = h.vectorCandidates(ctx, opts, bm25Results, poolSize(bm25Opts), vecTopK)
+		if err == nil {
+			vecResults, err = h.vector.SearchDocs(ctx, queryVec, vecTopK, opts, docIDs)
+		}
+	} else {
+		// No query term occurs in scope even after relaxation. Scanning every
+		// embedded chunk is the only way to answer, and leaving a purely
+		// semantic query empty would be worse than the cost.
+		vecResults, err = h.vector.Search(ctx, queryVec, vecTopK, opts)
+	}
 	if err != nil {
 		slog.Warn("vector search failed, falling back to BM25", "error", err)
 		return applyExtensionBoost(bm25Results, preferExts, extBoost), nil
@@ -104,4 +116,40 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 	// Truncation happens in Finalize, after dedupe and the per-document cap:
 	// cutting to TopK here would spend slots on duplicates.
 	return applyExtensionBoost(fused, preferExts, extBoost), nil
+}
+
+// vectorCandidates picks the documents the vector leg may rank. Scoring every
+// embedded chunk costs the whole corpus per query (1.4s at 424k chunks);
+// scoring BM25's candidates costs their chunks alone. The price is that a
+// document sharing no term with the query cannot surface through the vector
+// leg. A full BM25 pool is used as is. A short one -- a strict conjunction
+// that matched a handful of documents -- is widened with the best documents
+// matching any query term, so the vector leg still has up to vecTopK
+// documents to rank and a small lexical match does not cap the result count.
+func (h *Hybrid) vectorCandidates(ctx context.Context, opts SearchOpts, bm25Results []Result, pool, vecTopK int) ([]int64, error) {
+	ids := make([]int64, 0, max(len(bm25Results), vecTopK))
+	seen := make(map[int64]bool, cap(ids))
+	for _, r := range bm25Results {
+		if !seen[r.DocID] {
+			seen[r.DocID] = true
+			ids = append(ids, r.DocID)
+		}
+	}
+	if len(bm25Results) >= pool {
+		return ids, nil
+	}
+	wider, err := h.bm25.CandidateDocs(ctx, opts, vecTopK)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range wider {
+		if len(ids) >= vecTopK {
+			break
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
