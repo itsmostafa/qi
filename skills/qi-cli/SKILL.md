@@ -28,7 +28,7 @@ qi init
 ```
 
 ### `qi index [path|collection]`
-Indexes documents. SHA-256 content hashing means unchanged files are skipped. Embeddings are generated at index time — if you add an embedding provider to config after an initial index run, re-run `qi index` to populate the missing embeddings.
+Indexes documents. A file whose size and mtime match the last run is skipped without being read; otherwise SHA-256 content hashing decides whether it changed. Files over 10 MiB are skipped (counted in `skipped`). A second `qi index` against the same database waits for the first to finish rather than failing. Formats: `.md`/`.markdown`/`.mdx` (Markdown; MDX `import`/`export` and JSX tag lines are ignored), `.rst` (reStructuredText) and `.adoc`/`.asciidoc` (AsciiDoc) are split at section titles into heading paths; any other configured extension is plain text. Embeddings are generated at index time — if you add an embedding provider to config after an initial index run, re-run `qi index` to populate the missing embeddings.
 
 ```bash
 qi index                              # indexes current working directory
@@ -38,7 +38,7 @@ qi index --changed-since ORIG_HEAD .  # no-op unless an indexed file changed sin
 ```
 
 ### `qi hook install [path|collection]`
-Installs `post-merge` and `post-rewrite` git hooks in the repository holding the collection, so `git pull` (merge or rebase) reindexes it in the background with `qi index --changed-since ORIG_HEAD`. Pulls that touch no indexed file return immediately. Output goes to `qi-index.log` in the git directory. Respects `core.hooksPath`; reinstalling replaces qi's hooks, and a hook qi did not write is left alone with the line to add printed instead.
+Installs `post-merge`, `post-rewrite` and `post-commit` git hooks in the repository holding the collection. After `git pull` (merge, rebase or squash) or the commit that concludes a conflicted merge, every configured collection inside that repository is reindexed in the background with `qi index --changed-since <sha>`; pulls that touch no indexed file return immediately, and ordinary commits cost nothing. Output goes to `qi-index.log` in the git directory. Respects `core.hooksPath`; reinstalling (for any collection in the same repo) rewrites the same hooks, and a hook qi did not write is left alone with the line to add printed instead.
 
 ```bash
 qi hook install                       # the current directory's repository

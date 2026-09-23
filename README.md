@@ -110,7 +110,7 @@ qi hook install ~/src/monorepo
 | `qi delete <collection>` | Delete a collection and all its indexed data |
 | `qi stats` | Show index statistics |
 | `qi doctor` | Health check |
-| `qi hook install [path\|collection]` | Reindex a collection in the background after every `git pull` |
+| `qi hook install [path\|collection]` | Reindex a repository's collections in the background after every `git pull` |
 
 ## Search Modes
 
@@ -145,7 +145,7 @@ database_path: ~/.local/share/qi/qi.db
 collections:
   - name: notes
     path: ~/notes
-    extensions: [.md, .txt]
+    extensions: [.md, .txt]   # also .markdown, .mdx, .rst, .adoc; see docs/configuration.md
 
 providers:
   # Local (Ollama / llama.cpp)
