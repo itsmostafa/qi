@@ -13,6 +13,7 @@ import (
 func init() {
 	Register(".md", &markdownParser{})
 	Register(".markdown", &markdownParser{})
+	Register(".mdx", &markdownParser{})
 }
 
 type markdownParser struct{}

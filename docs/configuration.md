@@ -44,7 +44,7 @@ collections:
 | `name` | no | Generated identifier used in search output and CLI flags; filled from `path` if omitted |
 | `path` | yes | Directory to index; supports `~` and relative paths |
 | `description` | no | Human-readable label |
-| `extensions` | no | File extensions to index; omit to use built-in defaults (`.md .markdown .txt .text`) |
+| `extensions` | no | File extensions to index; omit to use built-in defaults (`.md .markdown .txt .text`). Setting it replaces the defaults. `.md`, `.markdown` and `.mdx` are parsed as Markdown; every other extension is indexed as plain text |
 | `ignore` | no | Globs of directories and files to skip during indexing |
 
 Each `ignore` entry is a glob matched against a file's collection-relative

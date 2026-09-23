@@ -369,3 +369,54 @@ func TestCodeLinesKeepDistinctRawSpans(t *testing.T) {
 		t.Errorf("code spans are not ordered: %+v", spans)
 	}
 }
+
+const mdxSample = "---\ntitle: Install Guide\ndate: 2026-05-01\ntags: [docs, setup]\n---\n" +
+	"import Tabs from '@theme/Tabs'\nimport { Callout } from '../components'\n\n" +
+	"# Install\n\nIntro para.\n\n## Platforms\n\n" +
+	"<Tabs>\n<TabItem value=\"mac\">\n\nUse brew install on macos.\n\n</TabItem>\n</Tabs>\n\n" +
+	"<Callout type=\"warn\" />\n\n<Callout type=\"info\">Inline callout text.</Callout>\n\n" +
+	"### Verify\n\nRun qi doctor.\n"
+
+// MDX is Markdown plus ESM and JSX; goldmark reads the ESM lines as a
+// preamble paragraph and JSX tags as HTML, so the Markdown structure survives.
+func TestMDXParsesAsMarkdown(t *testing.T) {
+	if _, ok := For(".mdx").(*markdownParser); !ok {
+		t.Fatalf("For(.mdx) = %T, want *markdownParser", For(".mdx"))
+	}
+	doc, err := For(".mdx").Parse("guide.mdx", []byte(mdxSample))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Title != "Install Guide" {
+		t.Errorf("Title = %q", doc.Title)
+	}
+	if doc.Meta.Timestamp != "2026-05-01" {
+		t.Errorf("Timestamp = %q", doc.Meta.Timestamp)
+	}
+	if len(doc.Meta.Tags) != 2 || doc.Meta.Tags[0] != "docs" || doc.Meta.Tags[1] != "setup" {
+		t.Errorf("Tags = %v", doc.Meta.Tags)
+	}
+
+	paths := map[string]string{}
+	for _, s := range doc.Sections {
+		paths[s.HeadingPath] += s.Text
+		for _, iv := range s.SourceMap {
+			if iv.StartLine <= 0 || iv.EndLine < iv.StartLine {
+				t.Errorf("section %q has invalid line range %d-%d", s.HeadingPath, iv.StartLine, iv.EndLine)
+			}
+		}
+	}
+	for _, want := range []string{"Install", "Install > Platforms", "Install > Platforms > Verify"} {
+		if _, ok := paths[want]; !ok {
+			t.Errorf("heading path %q missing; have %v", want, paths)
+		}
+	}
+	for _, want := range []string{"Use brew install on macos.", "Inline callout text."} {
+		if !strings.Contains(paths["Install > Platforms"], want) {
+			t.Errorf("JSX child text %q missing from Platforms section:\n%s", want, paths["Install > Platforms"])
+		}
+	}
+	if strings.Contains(paths["Install"], "import") {
+		t.Errorf("import line leaked into a headed section:\n%s", paths["Install"])
+	}
+}

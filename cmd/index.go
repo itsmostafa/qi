@@ -1,19 +1,25 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/itsmostafa/qi/internal/app"
 	"github.com/itsmostafa/qi/internal/config"
+	"github.com/itsmostafa/qi/internal/indexer"
 	"github.com/spf13/cobra"
 )
 
-var indexForce bool
+var (
+	indexForce        bool
+	indexChangedSince string
+)
 
 var indexCmd = &cobra.Command{
 	Use:   "index [path|collection]",
@@ -39,41 +45,36 @@ Colliding names take on leading path segments until unique.`,
 		}
 		defer a.Close()
 
-		// If arg looks like a path, index it as a (possibly new) collection.
-		if len(args) > 0 && isPathArg(args[0]) {
-			dir, err := resolveIndexPath(args[0])
-			if err != nil {
-				return fmt.Errorf("resolving path: %w", err)
-			}
-			col, err := autoCollection(a, dir)
-			if err != nil {
-				return err
-			}
-			return runIndex(ctx, a, []config.Collection{col})
+		col, err := resolveCollection(a, args)
+		if err != nil {
+			return err
 		}
-
-		// No args: index current directory as a (possibly new) collection.
-		if len(args) == 0 {
-			cwd, err := resolveIndexPath(".")
-			if err != nil {
-				return fmt.Errorf("resolving current directory: %w", err)
-			}
-			col, err := autoCollection(a, cwd)
-			if err != nil {
-				return err
-			}
-			return runIndex(ctx, a, []config.Collection{col})
-		}
-
-		// Otherwise treat arg as a collection name.
-		name := args[0]
-		for _, c := range a.Config.Collections {
-			if c.Name == name || c.OriginalName == name {
-				return runIndex(ctx, a, []config.Collection{c})
-			}
-		}
-		return fmt.Errorf("collection %q not found in config", name)
+		return runIndex(ctx, a, []config.Collection{col})
 	},
+}
+
+// resolveCollection maps the [path|collection] argument shared by index and
+// hook install to a collection. A path (or no argument, meaning the current
+// directory) is registered as a new collection if config has none for it.
+func resolveCollection(a *app.App, args []string) (config.Collection, error) {
+	if len(args) == 0 || isPathArg(args[0]) {
+		arg := "."
+		if len(args) > 0 {
+			arg = args[0]
+		}
+		dir, err := resolveIndexPath(arg)
+		if err != nil {
+			return config.Collection{}, fmt.Errorf("resolving path: %w", err)
+		}
+		return autoCollection(a, dir)
+	}
+	name := args[0]
+	for _, c := range a.Config.Collections {
+		if c.Name == name || c.OriginalName == name {
+			return c, nil
+		}
+	}
+	return config.Collection{}, fmt.Errorf("collection %q not found in config", name)
 }
 
 // autoCollection returns the existing collection for absPath if one is already
@@ -159,6 +160,16 @@ func runIndex(ctx context.Context, a *app.App, collections []config.Collection) 
 	a.Indexer.Force = indexForce
 	var collectionErrs []error
 	for _, col := range collections {
+		if indexChangedSince != "" {
+			changed, err := docsChangedSince(ctx, col, indexChangedSince)
+			switch {
+			case err != nil:
+				fmt.Printf("Cannot compare %q with %s, indexing everything: %v\n", col.Name, indexChangedSince, err)
+			case !changed:
+				fmt.Printf("Skipping %q: no indexed files changed since %s\n", col.Name, indexChangedSince)
+				continue
+			}
+		}
 		fmt.Printf("Indexing %q (%s)...\n", col.Name, col.Path)
 		stats, err := a.Indexer.Index(ctx, col)
 		if err != nil {
@@ -184,4 +195,34 @@ func runIndex(ctx context.Context, a *app.App, collections []config.Collection) 
 func init() {
 	indexCmd.Flags().BoolVar(&indexForce, "force", false,
 		"reindex files whose content is unchanged (needed after a qi upgrade changes parsing)")
+	indexCmd.Flags().StringVar(&indexChangedSince, "changed-since", "",
+		"skip the run unless a file qi indexes changed between this git revision and HEAD")
+}
+
+// docsChangedSince reports whether any file with one of col's indexed
+// extensions, under col.Path, differs between rev and HEAD. Deletions count:
+// they deactivate documents. An error means git could not answer (not a
+// repository, unknown revision), and the caller indexes everything.
+func docsChangedSince(ctx context.Context, col config.Collection, rev string) (bool, error) {
+	if strings.HasPrefix(rev, "-") {
+		return false, fmt.Errorf("invalid revision %q", rev)
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", col.Path,
+		"diff", "--name-only", "--no-renames", "-z", rev, "HEAD", "--", ".")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return false, fmt.Errorf("git diff: %s", msg)
+		}
+		return false, fmt.Errorf("git diff: %w", err)
+	}
+	exts := indexer.AllowedExtensions(col)
+	for _, name := range bytes.Split(out, []byte{0}) {
+		if exts[strings.ToLower(filepath.Ext(string(name)))] {
+			return true, nil
+		}
+	}
+	return false, nil
 }

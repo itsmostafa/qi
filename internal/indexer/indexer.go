@@ -50,6 +50,19 @@ const maxFileSize = 10 << 20 // 10 MiB
 // filters compare it as a string, so it must stay lexicographically ordered.
 const dateLayout = "2006-01-02"
 
+// AllowedExtensions returns the file extensions indexed for col: its
+// configured list, or the defaults when it has none.
+func AllowedExtensions(col config.Collection) map[string]bool {
+	if len(col.Extensions) == 0 {
+		return defaultExtensions
+	}
+	exts := make(map[string]bool, len(col.Extensions))
+	for _, ext := range col.Extensions {
+		exts[ext] = true
+	}
+	return exts
+}
+
 // Stats summarises an index run.
 type Stats struct {
 	FilesScanned int
@@ -93,14 +106,7 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 		return stats, err
 	}
 
-	// Determine allowed extensions
-	allowedExts := defaultExtensions
-	if len(col.Extensions) > 0 {
-		allowedExts = make(map[string]bool)
-		for _, ext := range col.Extensions {
-			allowedExts[ext] = true
-		}
-	}
+	allowedExts := AllowedExtensions(col)
 
 	// Ignore patterns are globs over the collection-relative path, applied to
 	// directories and files alike — `ignore` has always been documented as
@@ -286,12 +292,25 @@ func (idx *Indexer) compact(ctx context.Context) error {
 		return fmt.Errorf("pruning orphaned content: %w", err)
 	}
 
-	// FTS5 merges segments only when asked. Reindex cycles otherwise leave
-	// thousands of unmerged segments — 27 MiB of index for 241 chunks, in the
-	// case that prompted this.
-	if _, err := idx.db.ExecContext(ctx,
-		`INSERT INTO chunks_fts(chunks_fts) VALUES('optimize')`); err != nil {
-		return fmt.Errorf("optimizing fts index: %w", err)
+	// Every indexFile commit writes a new FTS5 segment, and automerge keeps the
+	// segment count logarithmic — but a replaced chunk's postings stay in the
+	// segment that first held them until a merge reaches it, and the big bottom
+	// segment is only reached by an optimize. Without one, reindex cycles grew
+	// the index without bound (27 MiB of index for 241 chunks, in the case that
+	// prompted this). optimize rewrites the whole index, though, so running it
+	// every time made a 10-file run pay for the entire corpus. Run it only once
+	// the pages written since the last one reach a quarter of the largest
+	// segment: the index stays within about 1.25x of its optimized size, and
+	// the rewrite is amortized over changes worth a quarter of the corpus.
+	largest, rest, err := ftsSegmentPages(ctx, idx.db.DB)
+	if err != nil {
+		slog.Warn("reading fts structure; optimizing unconditionally", "error", err)
+	}
+	if err != nil || rest > largest/4 {
+		if _, err := idx.db.ExecContext(ctx,
+			`INSERT INTO chunks_fts(chunks_fts) VALUES('optimize')`); err != nil {
+			return fmt.Errorf("optimizing fts index: %w", err)
+		}
 	}
 
 	var pageCount, freelist int64
@@ -309,6 +328,81 @@ func (idx *Indexer) compact(ctx context.Context) error {
 		return fmt.Errorf("vacuuming: %w", err)
 	}
 	return nil
+}
+
+// ftsSegmentPages reports the leaf pages in the largest segment of chunks_fts
+// and in all its other segments combined, read from the FTS5 structure record
+// (rowid 10 of the %_data table; layout per fts5StructureDecode in SQLite's
+// fts5_index.c). An empty index has no structure record and reports zeros.
+func ftsSegmentPages(ctx context.Context, conn *sql.DB) (largest, rest int64, err error) {
+	var rec []byte
+	err = conn.QueryRowContext(ctx, `SELECT block FROM chunks_fts_data WHERE id = 10`).Scan(&rec)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+
+	pos := 4 // configuration cookie
+	// The V2 layout (contentless_delete tables) carries tombstone counters per
+	// segment.
+	v2 := len(rec) >= 8 && string(rec[4:8]) == "\xff\x00\x00\x01"
+	if v2 {
+		pos += 4
+	}
+	next := func() uint64 {
+		v, n := sqliteVarint(rec[min(pos, len(rec)):])
+		if n == 0 {
+			err = errors.New("truncated fts5 structure record")
+		}
+		pos += n
+		return v
+	}
+	levels := next()
+	next() // total segments
+	next() // write counter
+	var total int64
+	for l := uint64(0); l < levels && err == nil; l++ {
+		next() // segments being merged
+		segs := next()
+		for s := uint64(0); s < segs && err == nil; s++ {
+			next() // segment id
+			first, last := next(), next()
+			if v2 {
+				for range 5 {
+					next()
+				}
+			}
+			pages := int64(last) - int64(first) + 1
+			total += pages
+			largest = max(largest, pages)
+		}
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	return largest, total - largest, nil
+}
+
+// sqliteVarint decodes SQLite's big-endian varint: seven bits per byte, high
+// bit set on all but the last, and a ninth byte contributing all eight bits.
+// It returns the number of bytes read, 0 if b ends mid-varint.
+func sqliteVarint(b []byte) (uint64, int) {
+	var v uint64
+	for i := 0; i < 8; i++ {
+		if i >= len(b) {
+			return 0, 0
+		}
+		v = v<<7 | uint64(b[i]&0x7f)
+		if b[i]&0x80 == 0 {
+			return v, i + 1
+		}
+	}
+	if len(b) < 9 {
+		return 0, 0
+	}
+	return v<<8 | uint64(b[8]), 9
 }
 
 func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPath string, data []byte, modTime time.Time, rangeRepairRequired bool, stats *Stats) error {

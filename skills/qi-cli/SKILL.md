@@ -34,6 +34,15 @@ Indexes documents. SHA-256 content hashing means unchanged files are skipped. Em
 qi index                              # indexes current working directory
 qi index ~/notes                      # any absolute or relative path
 qi index notes                        # generated collection name from config
+qi index --changed-since ORIG_HEAD .  # no-op unless an indexed file changed since that git revision
+```
+
+### `qi hook install [path|collection]`
+Installs `post-merge` and `post-rewrite` git hooks in the repository holding the collection, so `git pull` (merge or rebase) reindexes it in the background with `qi index --changed-since ORIG_HEAD`. Pulls that touch no indexed file return immediately. Output goes to `qi-index.log` in the git directory. Respects `core.hooksPath`; reinstalling replaces qi's hooks, and a hook qi did not write is left alone with the line to add printed instead.
+
+```bash
+qi hook install                       # the current directory's repository
+qi hook install ~/src/monorepo/docs   # a collection below the repository root
 ```
 
 ### `qi search <query>`
