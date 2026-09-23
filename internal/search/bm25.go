@@ -2,6 +2,8 @@ package search
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode"
@@ -73,6 +75,11 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 	// fill the pool would starve every other match once the per-document
 	// collapse downstream keeps only its best chunk. Rows arrive in rank order
 	// and the scan below stops at poolSize distinct documents instead.
+	//
+	// No snippet() either. The sort materializes every matching row before the
+	// first one arrives, and a snippet per match was most of the cost of a
+	// common term: 5.4s for "err" (412k matching chunks of 2.5M). Snippets are
+	// fetched afterwards for the selected chunks only.
 	query := fmt.Sprintf(`
 		SELECT
 			d.id,
@@ -85,7 +92,6 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 			COALESCE(c.start_line, 0),
 			COALESCE(c.end_line, 0),
 			COALESCE(d.doc_timestamp, ''),
-			snippet(chunks_fts, 0, ?, ?, '...', 32),
 			-bm25(chunks_fts)
 		FROM chunks_fts
 		JOIN chunks c ON c.id = chunks_fts.rowid
@@ -97,10 +103,18 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 		ORDER BY bm25(chunks_fts)
 	`, filters)
 
-	queryArgs := []any{HighlightOpen, HighlightClose, ftsQuery}
+	queryArgs := []any{ftsQuery}
 	queryArgs = append(queryArgs, args...)
 
-	rows, err := b.db.QueryContext(ctx, query, queryArgs...)
+	// One snapshot for ranking, snippets and passages, as in vector search:
+	// a concurrent `qi index` must not change the corpus between them.
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("bm25 transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("bm25 query: %w", err)
 	}
@@ -116,7 +130,7 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 		if err := rows.Scan(
 			&r.DocID, &r.ChunkID, &r.Collection, &r.Path, &r.Hash,
 			&r.Title, &r.HeadingPath, &r.StartLine, &r.EndLine,
-			&r.Timestamp, &r.Snippet, &score,
+			&r.Timestamp, &score,
 		); err != nil {
 			return nil, err
 		}
@@ -145,26 +159,70 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	if passageLimit(opts) > 0 && len(results) > 0 {
-		if err := b.addPassages(ctx, opts, ftsQuery, results); err != nil {
+	if len(results) == 0 {
+		return nil, nil
+	}
+	if err := addSnippets(ctx, tx, ftsQuery, results); err != nil {
+		return nil, err
+	}
+	if passageLimit(opts) > 0 {
+		if err := b.addPassages(ctx, tx, opts, ftsQuery, results); err != nil {
 			return nil, err
 		}
 	}
 	return results, nil
 }
 
-func (b *BM25) addPassages(ctx context.Context, opts SearchOpts, ftsQuery string, results []Result) error {
+// idsJSON encodes ids as a JSON array for json_each, which keeps an unbounded
+// result count clear of SQLite's bind-variable cap.
+func idsJSON(ids []int64) string {
+	b, _ := json.Marshal(ids)
+	return string(b)
+}
+
+// addSnippets fills in the highlighted snippet of each result's chunk.
+func addSnippets(ctx context.Context, tx *sql.Tx, ftsQuery string, results []Result) error {
+	byChunk := make(map[int64]int, len(results))
+	ids := make([]int64, len(results))
+	for i, r := range results {
+		byChunk[r.ChunkID] = i
+		ids[i] = r.ChunkID
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT rowid, snippet(chunks_fts, 0, ?, ?, '...', 32)
+		FROM chunks_fts
+		WHERE chunks_fts MATCH ? AND rowid IN (SELECT value FROM json_each(?))`,
+		HighlightOpen, HighlightClose, ftsQuery, idsJSON(ids))
+	if err != nil {
+		return fmt.Errorf("bm25 snippets query: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var chunkID int64
+		var snippet string
+		if err := rows.Scan(&chunkID, &snippet); err != nil {
+			return err
+		}
+		results[byChunk[chunkID]].Snippet = snippet
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return rows.Close()
+}
+
+func (b *BM25) addPassages(ctx context.Context, tx *sql.Tx, opts SearchOpts, ftsQuery string, results []Result) error {
 	limit := passageLimit(opts)
 	if limit == 0 {
 		return nil
 	}
-	placeholders := make([]string, len(results))
 	byDoc := make(map[int64]int, len(results))
+	docIDs := make([]int64, len(results))
 	for i, r := range results {
-		placeholders[i] = "?"
 		byDoc[r.DocID] = i
+		docIDs[i] = r.DocID
 	}
-	query := fmt.Sprintf(`
+	query := `
 		SELECT c.doc_id, c.id, COALESCE(c.heading_path, ''),
 		       COALESCE(c.start_line, 0), COALESCE(c.end_line, 0),
 		       snippet(chunks_fts, 0, ?, ?, '...', 32)
@@ -173,20 +231,16 @@ func (b *BM25) addPassages(ctx context.Context, opts SearchOpts, ftsQuery string
 		JOIN documents d ON d.id = c.doc_id
 		WHERE chunks_fts MATCH ? AND d.active = 1
 		  AND c.start_line >= 1 AND c.end_line >= c.start_line
-		  AND c.doc_id IN (%s)
+		  AND c.doc_id IN (SELECT value FROM json_each(?))
 		ORDER BY bm25(chunks_fts)
-	`, strings.Join(placeholders, ","))
-	// The snippet arguments and MATCH argument come first, followed by doc IDs.
-	args := []any{HighlightOpen, HighlightClose, ftsQuery}
-	for _, r := range results {
-		args = append(args, r.DocID)
-	}
+	`
+	args := []any{HighlightOpen, HighlightClose, ftsQuery, idsJSON(docIDs)}
 	counts := make(map[int64]int, len(results))
 	seen := make(map[int64]map[int64]bool, len(results))
 	for _, r := range results {
 		seen[r.DocID] = map[int64]bool{r.ChunkID: true}
 	}
-	rows, err := b.db.QueryContext(ctx, query, args...)
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("bm25 passages query: %w", err)
 	}

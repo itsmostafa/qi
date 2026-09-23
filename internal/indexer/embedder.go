@@ -2,7 +2,6 @@ package indexer
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -189,18 +188,30 @@ func describe(batch []chunkRow) string {
 }
 
 // pendingChunks returns every chunk of the collection whose vector/metadata
-// pair is missing, stale, or invalid, ordered so batches are stable.
+// pair is missing, stale, or malformed, ordered so batches are stable.
+//
+// Every check runs in SQL, so a no-op run never copies a vector out of the
+// database and never reads c.text for a healthy chunk. length() on a BLOB
+// comes from the record header rather than the payload. The finite-value and
+// non-zero-norm checks of db.ValidateEmbeddingBlob are deliberately not
+// repeated here: every write path (db.UpsertEmbedding, db.InsertEmbedding)
+// rejects such vectors before storing them, and has since the check was
+// introduced, so re-validating each blob on every run only paid for reading
+// the whole vector table. A value corrupted outside qi is still skipped by
+// vector search and reported by `qi doctor`.
 func (e *Embedder) pendingChunks(ctx context.Context, collection string, dimension int) ([]chunkRow, error) {
 	rows, err := e.db.QueryContext(ctx, `
-		SELECT c.id, d.path, c.text, cv.chunk_id, cv.vector,
-		       em.chunk_id, em.dimension, em.fingerprint
+		SELECT c.id, d.path, c.text
 		FROM chunks c
 		JOIN documents d ON d.id = c.doc_id
 		LEFT JOIN chunk_vectors cv ON cv.chunk_id = c.id
 		LEFT JOIN embeddings em ON em.chunk_id = c.id
 		WHERE d.collection = ? AND d.active = 1
+		  AND (cv.chunk_id IS NULL OR em.chunk_id IS NULL
+		       OR em.dimension IS NOT ? OR em.fingerprint IS NOT ?
+		       OR length(cv.vector) IS NOT ?)
 		ORDER BY c.id
-	`, collection)
+	`, collection, dimension, e.fingerprint, dimension*4)
 	if err != nil {
 		return nil, fmt.Errorf("fetching unembedded chunks: %w", err)
 	}
@@ -209,18 +220,10 @@ func (e *Embedder) pendingChunks(ctx context.Context, collection string, dimensi
 	var pending []chunkRow
 	for rows.Next() {
 		var row chunkRow
-		var vectorID, metadataID, storedDimension sql.NullInt64
-		var blob []byte
-		var storedFingerprint sql.NullString
-		if err := rows.Scan(&row.id, &row.path, &row.text, &vectorID, &blob, &metadataID, &storedDimension, &storedFingerprint); err != nil {
+		if err := rows.Scan(&row.id, &row.path, &row.text); err != nil {
 			return nil, fmt.Errorf("scanning embeddings to repair: %w", err)
 		}
-		valid := vectorID.Valid && metadataID.Valid && storedDimension.Valid &&
-			int(storedDimension.Int64) == dimension && storedFingerprint.Valid &&
-			storedFingerprint.String == e.fingerprint && db.ValidateEmbeddingBlob(blob, dimension) == nil
-		if !valid {
-			pending = append(pending, row)
-		}
+		pending = append(pending, row)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("reading embeddings to repair: %w", err)

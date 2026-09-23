@@ -44,7 +44,7 @@ collections:
 | `name` | no | Generated identifier used in search output and CLI flags; filled from `path` if omitted |
 | `path` | yes | Directory to index; supports `~` and relative paths |
 | `description` | no | Human-readable label |
-| `extensions` | no | File extensions to index; omit to use built-in defaults (`.md .markdown .txt .text`) |
+| `extensions` | no | File extensions to index; omit to use built-in defaults (`.md .markdown .txt .text`). Setting it replaces the defaults. `.md`, `.markdown` and `.mdx` are parsed as Markdown (in `.mdx`, `import`/`export` lines and JSX tag lines are ignored and text inside JSX blocks is indexed); `.rst` as reStructuredText and `.adoc`/`.asciidoc` as AsciiDoc, with section titles as heading paths; every other extension is indexed as plain text. Files over 10 MiB are skipped. Unchanged files are not reparsed after an upgrade that changes parsing: run `qi index --force <collection>` once, for example after upgrading if you already indexed `.mdx` files as plain text |
 | `ignore` | no | Globs of directories and files to skip during indexing |
 
 Each `ignore` entry is a glob matched against a file's collection-relative

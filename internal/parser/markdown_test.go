@@ -369,3 +369,107 @@ func TestCodeLinesKeepDistinctRawSpans(t *testing.T) {
 		t.Errorf("code spans are not ordered: %+v", spans)
 	}
 }
+
+const mdxSample = "---\ntitle: Install Guide\ndate: 2026-05-01\ntags: [docs, setup]\n---\n" +
+	"import Tabs from '@theme/Tabs'\nimport { Callout } from '../components'\n\n" +
+	"# Install\n\nIntro para.\n\n## Platforms\n\n" +
+	"<Tabs>\n<TabItem value=\"mac\">\n\nUse brew install on macos.\n\n</TabItem>\n</Tabs>\n\n" +
+	"<Callout type=\"warn\" />\n\n<Callout type=\"info\">Inline callout text.</Callout>\n\n" +
+	"### Verify\n\nRun qi doctor.\n"
+
+// MDX is Markdown plus ESM and JSX; goldmark reads the ESM lines as a
+// preamble paragraph and JSX tags as HTML, so the Markdown structure survives.
+func TestMDXParsesAsMarkdown(t *testing.T) {
+	if _, ok := For(".mdx").(*markdownParser); !ok {
+		t.Fatalf("For(.mdx) = %T, want *markdownParser", For(".mdx"))
+	}
+	doc, err := For(".mdx").Parse("guide.mdx", []byte(mdxSample))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Title != "Install Guide" {
+		t.Errorf("Title = %q", doc.Title)
+	}
+	if doc.Meta.Timestamp != "2026-05-01" {
+		t.Errorf("Timestamp = %q", doc.Meta.Timestamp)
+	}
+	if len(doc.Meta.Tags) != 2 || doc.Meta.Tags[0] != "docs" || doc.Meta.Tags[1] != "setup" {
+		t.Errorf("Tags = %v", doc.Meta.Tags)
+	}
+
+	paths := map[string]string{}
+	for _, s := range doc.Sections {
+		paths[s.HeadingPath] += s.Text
+		for _, iv := range s.SourceMap {
+			if iv.StartLine <= 0 || iv.EndLine < iv.StartLine {
+				t.Errorf("section %q has invalid line range %d-%d", s.HeadingPath, iv.StartLine, iv.EndLine)
+			}
+		}
+	}
+	for _, want := range []string{"Install", "Install > Platforms", "Install > Platforms > Verify"} {
+		if _, ok := paths[want]; !ok {
+			t.Errorf("heading path %q missing; have %v", want, paths)
+		}
+	}
+	for _, want := range []string{"Use brew install on macos.", "Inline callout text."} {
+		if !strings.Contains(paths["Install > Platforms"], want) {
+			t.Errorf("JSX child text %q missing from Platforms section:\n%s", want, paths["Install > Platforms"])
+		}
+	}
+	if strings.Contains(paths["Install"], "import") {
+		t.Errorf("import line leaked into a headed section:\n%s", paths["Install"])
+	}
+}
+
+func TestMDXDropsESMAndIndexesJSXChildren(t *testing.T) {
+	doc := parseWith(t, "guide.mdx", mdxSample+"\n<Tabs>\n<TabItem value=\"b\">\ntight child text\n</TabItem>\n</Tabs>\n")
+	body := bodyText(doc)
+	for _, leak := range []string{"import", "@theme/Tabs", "<TabItem", "</Tabs>", "<Callout type=\"warn\" />"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("MDX noise %q indexed:\n%s", leak, body)
+		}
+	}
+	for _, s := range doc.Sections {
+		if s.HeadingPath == "" && s.Text != "Install Guide\ndocs, setup" {
+			t.Errorf("untitled non-frontmatter section: %q", s.Text)
+		}
+	}
+	got := sectionsByPath(doc)["Install > Platforms > Verify"]
+	if !strings.Contains(got, "tight child text") {
+		t.Errorf("JSX child without blank lines not indexed: %q", got)
+	}
+	src := mdxSample + "\n<Tabs>\n<TabItem value=\"b\">\ntight child text\n</TabItem>\n</Tabs>\n"
+	wantLine := strings.Count(src[:strings.Index(src, "tight child")], "\n") + 1
+	for _, s := range doc.Sections {
+		if i := strings.Index(s.Text, "tight child text"); i >= 0 {
+			span, _ := SourceRange(s.SourceMap, i, i+len("tight child text"))
+			if span.StartLine != wantLine || span.EndLine != wantLine {
+				t.Errorf("JSX child span = %+v, want line %d", span, wantLine)
+			}
+		}
+	}
+}
+
+func TestMDXMultilineESMAndCodeFences(t *testing.T) {
+	src := "import {\n  A,\n  B,\n} from './x'\nexport const meta = {\n  a: 1,\n}\n\n# H\n\n```jsx\n<Foo />\nimport X from 'y'\n```\n\nimport this module later, not ESM\nbecause this line is prose.\n"
+	body := bodyText(parseWith(t, "g.mdx", src))
+	for _, leak := range []string{"from './x'", "meta", "  A,"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("ESM %q indexed:\n%s", leak, body)
+		}
+	}
+	for _, want := range []string{"<Foo />", "import X from 'y'", "because this line is prose"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%q missing:\n%s", want, body)
+		}
+	}
+}
+
+// The MDX cleanup keys on the extension; plain Markdown is unchanged.
+func TestMDXCleanupDoesNotAffectMarkdown(t *testing.T) {
+	src := "import a from 'b'\n\n# H\n\n<div>\nhtml text\n</div>\n"
+	md := bodyText(parseWith(t, "g.md", src))
+	if !strings.Contains(md, "import a from 'b'") || strings.Contains(md, "html text") {
+		t.Errorf(".md output changed:\n%s", md)
+	}
+}

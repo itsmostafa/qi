@@ -26,6 +26,56 @@ problem at all.
 
 ---
 
+## Update 2026-09-22: the monorepo half, and where Jev fits now
+
+**The monorepo goal was an indexing and scan problem, and it is now solved without Jev.** The
+target is a ~46 GB repository holding ~2 GB of docs, about 2.7M chunks. Measurements came from
+a 424k-chunk Go-source benchmark with stub 768-dim embeddings, and a 2.5M-chunk BM25-only copy
+of it:
+
+| Path | Before | After | Change |
+|---|---|---|---|
+| hybrid `qi query` with a lexical match (424k) | 1.26–1.41s | 0.01–0.06s | vector leg scores only BM25's candidate documents |
+| BM25 `err`, 412k matches (2.5M) | 5.2s | 1.2s | snippets computed for selected chunks only |
+| BM25 `the` (2.5M) | 11.9s | 1.9s | same |
+| no-op `qi index` (2.5M) | 9.2s | 2.7s | unchanged size+mtime skips the read (`file_stat`) |
+| no-op `qi index` with embeddings (424k) | 2.1s | 0.9s | same, plus pending-embedding checks in SQL |
+| one file over 10 MiB | every run failed | skipped | oversize is a skip, not an error |
+| two overlapping hook runs | second failed "database is locked" | second waits | flock on `<db>.index-lock` |
+
+`ext/vec1` (IVF) was evaluated and rejected; CLAUDE.md's vec1 note has the numbers. The vector
+leg now re-ranks lexical candidates, so a document sharing no term with the query cannot surface
+through it. When BM25 matches nothing, the full scan still runs: 1.33s at 424k, roughly 8–12s at
+2.7M. That is the one remaining slow path.
+
+**Jev still does not speed anything up.** A query now takes about 0.04s, so a 0.2–0.8s Jev round
+trip would be a 5–20× slowdown instead of the 1.2× it was when the vector scan dominated. Rank the
+candidates as follows.
+
+1. **Opt-in reranker over the fused pool** (recommendation 3). This is unchanged, but with a
+   stronger case for a flag (`--rerank`) rather than a default. It is still gated on the eval set
+   (recommendation 2). Hook it in after `ReciprocalRankFusion` in `internal/search/hybrid.go`,
+   before `search.Finalize`. Use one `noul` per (query, chunk) pair, K ≤ 30, with a 1s client
+   deadline; on any failure return the fused order.
+2. **Precision gate on the relaxation path**. When BM25 falls back to `OR` matching
+   (`sanitizeFTSQueryAny`) and the vector leg is bounded by those loose candidates, a Noul such as
+   "does this passage address the query?" can drop weak matches rather than show them. It fires
+   only on relaxed queries, so its latency is paid rarely. This is the best first Jev feature for
+   qi, because the new bounded vector leg makes relaxed candidates matter more.
+3. **Semantic-only recall is not a Jev job.** Jev judges candidates it is given; it cannot find
+   the document with no lexical overlap that the bounded vector leg now misses. If that gap
+   matters, the fix is an ANN index (vec1 once it gains threads or innocuous-vtab status), not a
+   judgment model.
+4. **Index-time judgments** (recommendation 4) are feasible only as increments. A full pass at
+   2.7M chunks is about 12h at 0.2s per call over 12 workers, plus roughly $20 of input tokens.
+   Per-document questions batched into one call, run only on files the stat skip reports as
+   changed, cost what a pull changes. Use them for doc-type or audience tags that `--path` cannot
+   express. Build this only once a concrete filter needs them.
+5. **Directory-scoping `Choice`**: skip. It would have traded a round trip for a skipped scan.
+   The scan is now bounded, so the trade no longer pays.
+
+---
+
 ## Ranked recommendations
 
 ### 1. Fix the vector scan — before touching Jev *(high confidence, code-verified)* — **implemented 2026-09-21**
@@ -240,9 +290,9 @@ about retrieval quality.
 ## Open questions
 
 1. **Does *any* reranker improve on qi's BM25+dense+RRF baseline?** No evidence survived in either direction. Answerable only locally — see recommendation 2.
-2. **What is the actual scaling curve of qi's vector path?** The `c.text` materialization is gone (recommendation 1, implemented), yet the scan still grows with chunk text at a fixed vector count. Untested hypothesis: `chunks.text` is column 5 while `start_line`/`end_line` were appended by migration 007, so the scan's line-range predicate has to read past the large column — through the overflow chain on spilled rows — to reach them. `EXPLAIN QUERY PLAN` on a copy of the local database confirms the shape: with `CREATE INDEX idx_chunks_scan ON chunks(doc_id, start_line, end_line)` the lean scan reports `SEARCH c USING COVERING INDEX` and never reads the table, while the *old* SELECT including `c.text` reports a plain `SEARCH c USING INDEX` and the table read returns. The index is therefore inert until chunk text leaves the scan — this change is its prerequisite, not its alternative. `id` is the rowid and is implicit, so it does not belong in the index. The covering plan also flips `d` to `SCAN d`, so measure on a real corpus before writing migration `008`. Is a pure-Go HNSW/ANN library usable without CGo? Would int8 or binary quantization with full-precision rescoring remove the need for ANN entirely at qi's corpus sizes?
-3. **Is the monorepo goal a retrieval problem or an indexing problem?** qi indexes only Markdown and plaintext, with no AST or symbol awareness. Would tree-sitter/ctags symbol extraction plus gitignore-aware incremental reindexing deliver more than any reranker could?
-4. **Should `bm25.go` pass its IN-clause IDs through `json_each` too?** The vector hydrate now does, which removed its placeholder loop and its bind-variable cap. `internal/search/bm25.go` still builds a placeholder list in `addPassages` with no cap at all. Mechanical to convert; no measured reason to yet.
+2. *(Sidestepped 2026-09-22: hybrid search no longer scans the whole corpus; see the update above.)* **What is the actual scaling curve of qi's vector path?** The `c.text` materialization is gone (recommendation 1, implemented), yet the scan still grows with chunk text at a fixed vector count. Untested hypothesis: `chunks.text` is column 5 while `start_line`/`end_line` were appended by migration 007, so the scan's line-range predicate has to read past the large column — through the overflow chain on spilled rows — to reach them. `EXPLAIN QUERY PLAN` on a copy of the local database confirms the shape: with `CREATE INDEX idx_chunks_scan ON chunks(doc_id, start_line, end_line)` the lean scan reports `SEARCH c USING COVERING INDEX` and never reads the table, while the *old* SELECT including `c.text` reports a plain `SEARCH c USING INDEX` and the table read returns. The index is therefore inert until chunk text leaves the scan — this change is its prerequisite, not its alternative. `id` is the rowid and is implicit, so it does not belong in the index. The covering plan also flips `d` to `SCAN d`, so measure on a real corpus before writing migration `008`. Is a pure-Go HNSW/ANN library usable without CGo? Would int8 or binary quantization with full-precision rescoring remove the need for ANN entirely at qi's corpus sizes?
+3. *(Answered 2026-09-22: indexing and scan cost, fixed in qi without Jev; qi now also parses `.rst`, `.adoc` and `.mdx`.)* **Is the monorepo goal a retrieval problem or an indexing problem?** qi indexes only Markdown and plaintext, with no AST or symbol awareness. Would tree-sitter/ctags symbol extraction plus gitignore-aware incremental reindexing deliver more than any reranker could?
+4. *(Done 2026-09-22.)* **Should `bm25.go` pass its IN-clause IDs through `json_each` too?** The vector hydrate now does, which removed its placeholder loop and its bind-variable cap. `internal/search/bm25.go` still builds a placeholder list in `addPassages` with no cap at all. Mechanical to convert; no measured reason to yet.
 5. **Does packing K candidates into one Jev state degrade ranking vs. per-candidate fan-out?** The jaggedness page warns about context rot; the no-contamination claim was refuted; only a community project does the packing. A cheap A/B on a fixed shortlist would settle it and decide the adapter's shape.
 
 ---

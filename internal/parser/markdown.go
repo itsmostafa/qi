@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -13,6 +14,7 @@ import (
 func init() {
 	Register(".md", &markdownParser{})
 	Register(".markdown", &markdownParser{})
+	Register(".mdx", &markdownParser{})
 }
 
 type markdownParser struct{}
@@ -55,6 +57,9 @@ func (b *mappedBuilder) raw(value []byte, rawStart, rawBase int, src []byte, map
 
 func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 	meta, body, offset := splitFrontmatter(data)
+	if strings.EqualFold(filepath.Ext(path), ".mdx") {
+		body = blankMDXNoise(body)
+	}
 	mapper := newSourceMapper(data)
 	md := goldmark.New()
 	node := md.Parser().Parse(text.NewReader(body))
@@ -167,21 +172,7 @@ func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 
 	flush()
 	if len(sections) == fromFrontmatter && len(headings) > 0 {
-		var b strings.Builder
-		var sourceMap []SourceInterval
-		for i, heading := range headings {
-			if i > 0 {
-				start := b.Len()
-				b.WriteByte('\n')
-				sourceMap = append(sourceMap, SourceInterval{TextStart: start, TextEnd: start + 1, SourceSpan: sourcePointAt(headingSpans[i-1])})
-			}
-			start := b.Len()
-			b.WriteString(heading)
-			sourceMap = append(sourceMap, SourceInterval{TextStart: start, TextEnd: b.Len(), SourceSpan: headingSpans[i]})
-		}
-		text := b.String()
-		sections = append(sections, Section{Text: text, Ordinal: headingSpans[0].Start,
-			SourceMap: sourceMap})
+		sections = append(sections, headingFallback(headings, headingSpans))
 	}
 	doc.Sections = sections
 	return doc, nil

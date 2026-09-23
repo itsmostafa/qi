@@ -94,14 +94,17 @@ var doctorCmd = &cobra.Command{
 				ok = false
 			} else {
 				status := "OK"
-				if health.Missing+health.Stale+health.Orphaned > 0 {
+				repairable := health.Missing + health.Stale + health.Orphaned
+				if repairable+health.Corrupt > 0 {
 					status = "WARN"
 					ok = false
 				}
-				fmt.Printf("  %-4s  embeddings: %d current / %d missing / %d stale / %d orphaned\n",
-					status, health.Current, health.Missing, health.Stale, health.Orphaned)
-				if status == "WARN" && cfg.Providers.Embedding != nil {
+				fmt.Printf("  %-4s  embeddings: %s\n", status, health)
+				if repairable > 0 {
 					fmt.Println("        run `qi index` to repair missing, stale, or orphaned embeddings")
+				}
+				if health.Corrupt > 0 {
+					fmt.Println("        run `qi index --force <collection>` to replace corrupt embeddings")
 				}
 			}
 		}

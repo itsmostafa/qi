@@ -228,3 +228,42 @@ func (testEmbeddingProvider) Embed(_ context.Context, texts []string) ([][]float
 func (testEmbeddingProvider) ModelName() string { return "test-model" }
 
 func (testEmbeddingProvider) Dimension() int { return 4 }
+
+// Several paths in one run each become a collection and are indexed, which is
+// how a pull hook covers every collection in a repository at once.
+func TestIndexCommandIndexesSeveralPaths(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	for _, dir := range []string{first, second} {
+		if err := os.WriteFile(filepath.Join(dir, "doc.md"), []byte("# Doc\nText."), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfgPath := writeIndexTestConfig(t, "database_path: qi.db\ncollections: []\n")
+	withIndexTestConfig(t, cfgPath)
+
+	var runErr error
+	captureIndexTestOutput(t, func() { runErr = indexCmd.RunE(indexCmd, []string{first, second}) })
+	if runErr != nil {
+		t.Fatalf("index: %v", runErr)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Collections) != 2 {
+		t.Fatalf("want two collections registered, got %+v", cfg.Collections)
+	}
+	database, err := db.Open(context.Background(), cfg.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var collections int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(DISTINCT collection) FROM documents WHERE active = 1`).Scan(&collections); err != nil {
+		t.Fatal(err)
+	}
+	if collections != 2 {
+		t.Fatalf("documents indexed in %d collections, want 2", collections)
+	}
+}
