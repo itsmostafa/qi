@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.2.2](https://github.com/itsmostafa/qi/compare/v0.2.1...v0.2.2) (2026-10-25)
+
+
+### Features
+
+* **hook:** thin hooks, serialized index runs, first-pull message ([6a302c7](https://github.com/itsmostafa/qi/commit/6a302c73df64fd61eedb514b9c19746e9588f0b4))
+* index docs on git pull and scale qi to large monorepos ([0105dad](https://github.com/itsmostafa/qi/commit/0105dada5bba8a68034040870f0de0fc61c7617c))
+* index on git pull and cut per-run costs for large doc corpora ([34c3c51](https://github.com/itsmostafa/qi/commit/34c3c514d4f127032d7852553b7b19105d494c15))
+* **indexer:** skip binary files whatever their extension ([17c1551](https://github.com/itsmostafa/qi/commit/17c1551153808168dcdcb4b2a314949bb2dec1aa))
+* **parser:** heading-aware rst and AsciiDoc parsers, MDX noise removal ([f31346a](https://github.com/itsmostafa/qi/commit/f31346ad48487ea605bfe7ab6820b704096c6c6c))
+
+
+### Bug Fixes
+
+* address review findings on parsers, stat skip and hook runs ([a712130](https://github.com/itsmostafa/qi/commit/a712130818d89fbdd22029e64476b6c60626271a))
+* **doctor:** report corrupt embeddings and point at a forced reindex ([cc0d48d](https://github.com/itsmostafa/qi/commit/cc0d48df98394e611fffd8154d9efe3e9cb91a2f))
+* **hook:** deactivate a collection whose root a pull deleted ([972bb85](https://github.com/itsmostafa/qi/commit/972bb85f9898f3d4d5a7064d55842d1e734b8956))
+* **parser:** accept nested braces in MDX JSX attribute expressions ([ae45f65](https://github.com/itsmostafa/qi/commit/ae45f65bb6a27cb228afec1610b41fb342fd052e))
+* **parser:** blank MDX tag lines whose attribute values hold angle brackets ([f836bbc](https://github.com/itsmostafa/qi/commit/f836bbc8a41dad72e846e8699a8ea2423cf3f894))
+
+
+### Performance Improvements
+
+* **index:** skip unchanged files by stat, keep FTS free of deleted text ([82b30c4](https://github.com/itsmostafa/qi/commit/82b30c44a8fa74659ede7736a6af1a12e8669b78))
+* **search:** bound the vector leg to BM25 candidates, snippet after ranking ([602f258](https://github.com/itsmostafa/qi/commit/602f258124cfef271256bbcd08f356919183b36a))
+
+
+### Miscellaneous Chores
+
+* release 0.2.2 ([1dbf021](https://github.com/itsmostafa/qi/commit/1dbf021eefc31aedf2288eedf0fab3beff021579))
+
 ## [0.2.1](https://github.com/itsmostafa/qi/compare/v0.2.0...v0.2.1) (2026-09-21)
 
 
