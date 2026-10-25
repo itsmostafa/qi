@@ -95,7 +95,7 @@ func (p *adocParser) Parse(path string, data []byte) (*Document, error) {
 	for i < len(lines) && (text(i) == "" || adocLineComment(text(i))) {
 		i++
 	}
-	attrs := map[string]rawLine{}
+	attrs := map[string]SourceSpan{}
 	values := map[string]string{}
 	titled := false
 	if i < len(lines) {
@@ -132,7 +132,7 @@ func (p *adocParser) Parse(path string, data []byte) (*Document, error) {
 			i++
 			value = strings.TrimSpace(strings.TrimSuffix(value, "\\")) + " " + strings.TrimSpace(text(i))
 		}
-		attrs[name] = rawLine{start: first.start, end: lines[i].end, next: lines[i].next}
+		attrs[name] = s.mapper.span(first.start, lines[i].end)
 		values[name] = value
 	}
 
@@ -142,30 +142,21 @@ func (p *adocParser) Parse(path string, data []byte) (*Document, error) {
 	if values[tagKey] == "" {
 		tagKey = "tags"
 	}
-	for _, tag := range strings.Split(values[tagKey], ",") {
-		if tag = strings.TrimSpace(tag); tag != "" {
-			doc.Meta.Tags = append(doc.Meta.Tags, tag)
-		}
-	}
+	doc.Meta.Tags = splitList(values[tagKey])
 	// Description and tags stay searchable as a leading summary, as Markdown
-	// frontmatter does, each mapped to its attribute entry.
-	var summary mappedBuilder
-	for _, field := range []struct{ key, text string }{
-		{"description", doc.Meta.Description},
-		{tagKey, strings.Join(doc.Meta.Tags, ", ")},
-	} {
-		if field.text == "" {
-			continue
+	// frontmatter does, each mapped to its attribute entry. The title is
+	// already the first heading.
+	var texts []string
+	var spans []SourceSpan
+	for _, field := range (Meta{Description: doc.Meta.Description, Tags: doc.Meta.Tags}).summaryFields() {
+		key := field.key
+		if key == "tags" {
+			key = tagKey
 		}
-		span := s.mapper.span(attrs[field.key].start, attrs[field.key].end)
-		if summary.Len() > 0 {
-			summary.fallback("\n", sourcePointAt(span))
-		}
-		summary.fallback(field.text, span)
+		texts, spans = append(texts, field.text), append(spans, attrs[key])
 	}
-	if summary.Len() > 0 {
-		s.sections = append(s.sections, Section{Text: summary.String(), Ordinal: summary.intervals[0].Start,
-			SourceMap: summary.intervals})
+	if len(texts) > 0 {
+		s.sections = append(s.sections, joinedSection(texts, spans))
 		s.summaries = 1
 	}
 

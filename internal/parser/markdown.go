@@ -2,7 +2,6 @@ package parser
 
 import (
 	"bytes"
-	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -14,10 +13,12 @@ import (
 func init() {
 	Register(".md", &markdownParser{})
 	Register(".markdown", &markdownParser{})
-	Register(".mdx", &markdownParser{})
+	Register(".mdx", &markdownParser{mdx: true})
 }
 
-type markdownParser struct{}
+type markdownParser struct {
+	mdx bool // blank ESM and JSX tag lines before parsing
+}
 
 type mappedText struct {
 	text      string
@@ -57,7 +58,7 @@ func (b *mappedBuilder) raw(value []byte, rawStart, rawBase int, src []byte, map
 
 func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 	meta, body, offset := splitFrontmatter(data)
-	if strings.EqualFold(filepath.Ext(path), ".mdx") {
+	if p.mdx {
 		body = blankMDXNoise(body)
 	}
 	mapper := newSourceMapper(data)
@@ -71,30 +72,17 @@ func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 	var currentMap []SourceInterval
 
 	if summaryFields := meta.summaryFields(); len(summaryFields) > 0 {
-		parts := make([]string, len(summaryFields))
+		fieldSpans := frontmatterFieldSpans(data, offset, mapper)
+		texts := make([]string, len(summaryFields))
+		spans := make([]SourceSpan, len(summaryFields))
 		for i, field := range summaryFields {
-			parts[i] = field.text
-		}
-		summary := strings.Join(parts, "\n")
-		whole := mapper.span(0, offset)
-		fields := frontmatterFieldSpans(data, offset, mapper)
-		var summaryMap []SourceInterval
-		textOffset := 0
-		for i, field := range summaryFields {
-			if i > 0 {
-				separator := SourceInterval{TextStart: textOffset, TextEnd: textOffset + 1, SourceSpan: sourcePointAt(summaryMap[len(summaryMap)-1].SourceSpan)}
-				summaryMap = append(summaryMap, separator)
-				textOffset++
-			}
-			span, ok := fields[field.key]
+			span, ok := fieldSpans[field.key]
 			if !ok {
-				span = whole
+				span = mapper.span(0, offset)
 			}
-			summaryMap = append(summaryMap, SourceInterval{TextStart: textOffset, TextEnd: textOffset + len(field.text), SourceSpan: span})
-			textOffset += len(field.text)
+			texts[i], spans[i] = field.text, span
 		}
-		sections = append(sections, Section{Text: summary, Ordinal: summaryMap[0].SourceSpan.Start,
-			SourceMap: summaryMap})
+		sections = append(sections, joinedSection(texts, spans))
 	}
 	fromFrontmatter := len(sections)
 	var headings []string
@@ -172,7 +160,7 @@ func (p *markdownParser) Parse(path string, data []byte) (*Document, error) {
 
 	flush()
 	if len(sections) == fromFrontmatter && len(headings) > 0 {
-		sections = append(sections, headingFallback(headings, headingSpans))
+		sections = append(sections, joinedSection(headings, headingSpans))
 	}
 	doc.Sections = sections
 	return doc, nil

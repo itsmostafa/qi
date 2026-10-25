@@ -95,17 +95,19 @@ func (s *lineSections) flush() {
 func (s *lineSections) finish() []Section {
 	s.flush()
 	if len(s.sections) == s.summaries && len(s.headings) > 0 {
-		s.sections = append(s.sections, headingFallback(s.headings, s.headingSpans))
+		s.sections = append(s.sections, joinedSection(s.headings, s.headingSpans))
 	}
 	return s.sections
 }
 
-// headingFallback gives a document with headings but no body one chunk that
-// carries every heading, so it stays searchable.
-func headingFallback(headings []string, spans []SourceSpan) Section {
+// joinedSection joins texts with newlines into one section, each part cited
+// to its span and each separator to the end of the part before it. It builds
+// the metadata summary and, for a document with headings but no body, the one
+// chunk that keeps every heading searchable.
+func joinedSection(texts []string, spans []SourceSpan) Section {
 	var b strings.Builder
 	var sourceMap []SourceInterval
-	for i, heading := range headings {
+	for i, heading := range texts {
 		if i > 0 {
 			start := b.Len()
 			b.WriteByte('\n')

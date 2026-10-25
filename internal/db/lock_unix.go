@@ -31,11 +31,11 @@ func LockIndex(dbPath string, waiting func()) (unlock func(), err error) {
 	fd := int(f.Fd())
 	err = unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
 	if errors.Is(err, unix.EWOULDBLOCK) {
-		if waiting != nil {
-			waiting()
-		}
-		for err = unix.Flock(fd, unix.LOCK_EX); errors.Is(err, unix.EINTR); {
-			err = unix.Flock(fd, unix.LOCK_EX)
+		waiting()
+		for {
+			if err = unix.Flock(fd, unix.LOCK_EX); !errors.Is(err, unix.EINTR) {
+				break
+			}
 		}
 	}
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestMigration004RecoversAfterColumnAddedWithoutVersion(t *testing.T) {
@@ -107,5 +108,35 @@ func TestMigration006RecoversAfterColumnsAddedWithoutVersion(t *testing.T) {
 	}
 	if versions != 1 {
 		t.Errorf("recovery left version 6 unrecorded")
+	}
+}
+
+func TestOpenMigratedDatabaseDuringWrite(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "qi.db")
+	writer, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	tx, err := writer.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM documents`); err != nil {
+		t.Fatal(err)
+	}
+
+	// An up-to-date database must open without the write lock, or every search
+	// waits out the busy timeout behind a background index run.
+	start := time.Now()
+	reader, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader.Close()
+	if d := time.Since(start); d > busyTimeout/2 {
+		t.Fatalf("Open waited %s for the write lock", d)
 	}
 }

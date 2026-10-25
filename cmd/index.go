@@ -98,19 +98,16 @@ Colliding names take on leading path segments until unique.`,
 // hook install to a collection. A path is registered as a new collection if
 // config has none for it.
 func resolveCollection(a *app.App, arg string) (config.Collection, error) {
-	if !isPathArg(arg) {
-		return collectionByName(a.Config, arg)
+	col, err := previewCollection(a.Config, arg)
+	if err != nil || !isPathArg(arg) {
+		return col, err
 	}
-	dir, err := resolveIndexPath(arg)
-	if err != nil {
-		return config.Collection{}, fmt.Errorf("resolving path: %w", err)
-	}
-	return autoCollection(a, dir)
+	return autoCollection(a, col.Path)
 }
 
 // previewCollection resolves arg like resolveCollection but never writes
-// config: a path with no collection yet gets a stand-in named after its
-// directory, carrying the default extensions.
+// config: a path with no collection yet gets a stand-in with the name it would
+// be saved under, carrying the default extensions.
 func previewCollection(cfg *config.Config, arg string) (config.Collection, error) {
 	if !isPathArg(arg) {
 		return collectionByName(cfg, arg)
@@ -125,7 +122,19 @@ func previewCollection(cfg *config.Config, arg string) (config.Collection, error
 	if existing := findCollectionByPath(cfg.Collections, dir); existing != nil {
 		return *existing, nil
 	}
-	return config.Collection{Name: filepath.Base(dir), Path: dir}, nil
+	return config.Collection{Name: newCollectionName(cfg.Collections, dir), Path: dir}, nil
+}
+
+// newCollectionName names a collection for absPath alongside the existing
+// ones, or a colliding basename would be written to config and then
+// disambiguated differently in memory on every load.
+func newCollectionName(collections []config.Collection, absPath string) string {
+	paths := make([]string, 0, len(collections)+1)
+	for _, c := range collections {
+		paths = append(paths, c.Path)
+	}
+	paths = append(paths, absPath)
+	return config.AssignCollectionNames(paths)[len(paths)-1]
 }
 
 func collectionByName(cfg *config.Config, name string) (config.Collection, error) {
@@ -154,15 +163,7 @@ func autoCollection(a *app.App, absPath string) (config.Collection, error) {
 		}
 		return *existing, nil
 	}
-	// Name the new collection alongside the existing ones, or a colliding
-	// basename would be written to config and then disambiguated differently
-	// in memory on every load.
-	paths := make([]string, 0, len(a.Config.Collections)+1)
-	for _, c := range a.Config.Collections {
-		paths = append(paths, c.Path)
-	}
-	paths = append(paths, absPath)
-	slug := config.AssignCollectionNames(paths)[len(paths)-1]
+	slug := newCollectionName(a.Config.Collections, absPath)
 	col := config.Collection{Name: slug, Path: absPath}
 	if err := saveCollection(col); err != nil {
 		return config.Collection{}, err
@@ -257,21 +258,19 @@ var errUnknownRevision = errors.New("unknown revision")
 // printing why when the answer is not a plain yes.
 func changedSince(ctx context.Context, col config.Collection, rev string) bool {
 	sha, err := resolveRevision(ctx, col.Path, rev)
+	changed := true
 	if err == nil {
-		var changed bool
-		if changed, err = docsChangedSince(ctx, col, sha); err == nil {
-			if !changed {
-				fmt.Printf("Skipping %q: no indexed files changed since %s\n", col.Name, rev)
-			}
-			return changed
-		}
+		changed, err = docsChangedSince(ctx, col, sha)
 	}
-	if errors.Is(err, errUnknownRevision) {
+	switch {
+	case err == nil && !changed:
+		fmt.Printf("Skipping %q: no indexed files changed since %s\n", col.Name, rev)
+	case errors.Is(err, errUnknownRevision):
 		fmt.Printf("No %s to compare with yet, as after a fresh clone: running a full index of %q\n", rev, col.Name)
-	} else {
+	case err != nil:
 		fmt.Printf("Cannot compare %q with %s, indexing everything: %v\n", col.Name, rev, err)
 	}
-	return true
+	return changed || err != nil
 }
 
 // resolveRevision pins rev to a commit hash in the repository holding dir.

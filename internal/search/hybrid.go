@@ -129,17 +129,17 @@ func (h *Hybrid) Search(ctx context.Context, opts SearchOpts) ([]Result, error) 
 func (h *Hybrid) vectorCandidates(ctx context.Context, opts SearchOpts, bm25Results []Result, pool, vecTopK int) ([]int64, error) {
 	ids := make([]int64, 0, max(len(bm25Results), vecTopK))
 	seen := make(map[int64]bool, cap(ids))
-	for _, r := range bm25Results {
-		if !seen[r.DocID] {
-			seen[r.DocID] = true
-			ids = append(ids, r.DocID)
-		}
+	for _, r := range bm25Results { // one row per document already
+		seen[r.DocID] = true
+		ids = append(ids, r.DocID)
 	}
 	if len(bm25Results) >= pool {
 		return ids, nil
 	}
+	// A short pool from the any-term query itself (a single term) already
+	// holds every match.
 	anyTerm := sanitizeFTSQueryAny(opts.Query)
-	if anyTerm == "" {
+	if anyTerm == "" || anyTerm == sanitizeFTSQuery(opts.Query) {
 		return ids, nil
 	}
 	// searchFTS stops at Pool distinct documents and fetches snippets for

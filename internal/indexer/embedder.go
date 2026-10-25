@@ -190,15 +190,9 @@ func describe(batch []chunkRow) string {
 // pendingChunks returns every chunk of the collection whose vector/metadata
 // pair is missing, stale, or malformed, ordered so batches are stable.
 //
-// Every check runs in SQL, so a no-op run never copies a vector out of the
-// database and never reads c.text for a healthy chunk. length() on a BLOB
-// comes from the record header rather than the payload. The finite-value and
-// non-zero-norm checks of db.ValidateEmbeddingBlob are deliberately not
-// repeated here: every write path (db.UpsertEmbedding, db.InsertEmbedding)
-// rejects such vectors before storing them, and has since the check was
-// introduced, so re-validating each blob on every run only paid for reading
-// the whole vector table. A value corrupted outside qi is still skipped by
-// vector search and reported by `qi doctor`.
+// It checks shape in SQL only (length() reads the record header, not the
+// vector): write paths reject non-finite vectors, and `qi doctor` reports any
+// corrupted outside qi.
 func (e *Embedder) pendingChunks(ctx context.Context, collection string, dimension int) ([]chunkRow, error) {
 	rows, err := e.db.QueryContext(ctx, `
 		SELECT c.id, d.path, c.text

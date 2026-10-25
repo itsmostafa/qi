@@ -212,9 +212,6 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 			return nil
 		}
 
-		stats.FilesScanned++
-		seenPaths[rel] = true
-
 		if err == nil {
 			read := func() ([]byte, error) {
 				if idx.beforeRead != nil {
@@ -224,15 +221,15 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 			}
 			err = idx.indexFile(ctx, col, rel, info, read, rangeRepairs[rel], &stats)
 		}
-		// Like an oversize file: skipped, and dropped from seenPaths so a
+		// Like an oversize file: skipped, and not recorded in seenPaths so a
 		// document whose file turned binary is deactivated.
 		if errors.Is(err, errBinary) {
 			slog.Warn("skipping binary file", "path", rel)
-			delete(seenPaths, rel)
-			stats.FilesScanned--
 			stats.FilesSkipped++
 			return nil
 		}
+		stats.FilesScanned++
+		seenPaths[rel] = true
 		if err != nil {
 			err = fmt.Errorf("indexing %s: %w", rel, err)
 			slog.Warn("failed to index file", "path", rel, "error", err)
@@ -323,16 +320,10 @@ func (idx *Indexer) compact(ctx context.Context) error {
 		return fmt.Errorf("pruning orphaned content: %w", err)
 	}
 
-	// Removed text needs no optimize: chunks_fts has secure-delete on
-	// (migration 008), so deleting a chunk removes its entries from the
-	// segment that holds them rather than writing a delete marker that only
-	// an optimize would purge. What remains is segment count: every indexFile
-	// commit writes a new segment, automerge keeps the count logarithmic, and
-	// the big bottom segment is only merged by an optimize. optimize rewrites
-	// the whole index, so running it every time made a 10-file run pay for the
-	// entire corpus. Run it only once the pages written since the last one
-	// reach a quarter of the largest segment, amortizing the rewrite over
-	// changes worth a quarter of the corpus.
+	// Secure-delete (migration 008) already purges removed text, so optimize
+	// only bounds segment count. It rewrites the whole index, so run it once
+	// the pages written since the last one reach a quarter of the largest
+	// segment rather than on every run.
 	largest, rest, err := ftsSegmentPages(ctx, idx.db.DB)
 	if err != nil {
 		slog.Warn("reading fts structure; optimizing unconditionally", "error", err)

@@ -63,13 +63,20 @@ func (s *stringList) UnmarshalYAML(n *yaml.Node) error {
 		}
 		*s = out
 	case yaml.ScalarNode:
-		for _, p := range strings.Split(n.Value, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				*s = append(*s, p)
-			}
-		}
+		*s = splitList(n.Value)
 	}
 	return nil
+}
+
+// splitList splits a comma-separated list, dropping blank entries.
+func splitList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // splitFrontmatter separates a leading YAML frontmatter block from the body.
