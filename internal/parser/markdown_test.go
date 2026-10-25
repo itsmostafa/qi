@@ -450,6 +450,17 @@ func TestMDXDropsESMAndIndexesJSXChildren(t *testing.T) {
 	}
 }
 
+// A ">" or "<" inside an attribute value must not keep the tag line from
+// being blanked, or goldmark folds the children into a discarded HTML block.
+func TestMDXTagWithAngleBracketAttribute(t *testing.T) {
+	for _, attr := range []string{`label="A > B"`, `label='A < B'`, `onClick={() => go()}`} {
+		body := bodyText(parseWith(t, "g.mdx", "# H\n\n<Tabs>\n<TabItem "+attr+">\ntight child text\n</TabItem>\n</Tabs>\n"))
+		if !strings.Contains(body, "tight child text") || strings.Contains(body, "TabItem") {
+			t.Errorf("%s: body = %q", attr, body)
+		}
+	}
+}
+
 func TestMDXMultilineESMAndCodeFences(t *testing.T) {
 	src := "import {\n  A,\n  B,\n} from './x'\nexport const meta = {\n  a: 1,\n}\n\n# H\n\n```jsx\n<Foo />\nimport X from 'y'\n```\n\nimport this module later, not ESM\nbecause this line is prose.\n"
 	body := bodyText(parseWith(t, "g.mdx", src))
