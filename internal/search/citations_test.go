@@ -89,7 +89,9 @@ func TestHybridKeepsValidVectorHitsWithUnknownRanges(t *testing.T) {
 	defer srv.Close()
 	embedder := providers.NewEmbedding(&config.EmbeddingProviderConfig{BaseURL: srv.URL, Model: "model", Dimension: 2})
 	hybrid := NewHybrid(NewBM25(database), NewVectorSearch(database, "fp"), embedder, config.SearchConfig{VectorTopK: 1})
-	results, err := hybrid.Search(ctx, SearchOpts{Query: "programming", TopK: 1, Passages: 1})
+	// "evidence" makes document 2 a lexical candidate: the vector leg ranks
+	// only BM25's candidate documents.
+	results, err := hybrid.Search(ctx, SearchOpts{Query: "programming evidence", TopK: 1, Passages: 1})
 	if err != nil || len(results) != 2 {
 		t.Fatalf("valid vector document lost: results=%+v err=%v", results, err)
 	}

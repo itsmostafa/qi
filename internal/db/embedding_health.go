@@ -7,12 +7,22 @@ import (
 )
 
 // EmbeddingHealth partitions active chunks into mutually exclusive states.
-// Orphaned means one side is absent or the vector/metadata pair is invalid.
+// Orphaned means one side is absent or the pair's shape is wrong, which the
+// next `qi index` repairs. Corrupt means a correctly shaped vector holds
+// non-finite or all-zero values; qi never writes one, so the embedder does not
+// look for it on every run, and only a forced reindex replaces it.
 type EmbeddingHealth struct {
 	Current  int
 	Missing  int
 	Stale    int
 	Orphaned int
+	Corrupt  int
+}
+
+// String is the one-line summary doctor and stats print.
+func (h EmbeddingHealth) String() string {
+	return fmt.Sprintf("%d current / %d missing / %d stale / %d orphaned / %d corrupt",
+		h.Current, h.Missing, h.Stale, h.Orphaned, h.Corrupt)
 }
 
 func (db *DB) EmbeddingHealth(ctx context.Context, fingerprint string, dimension int, collection string) (EmbeddingHealth, error) {
@@ -46,8 +56,10 @@ func (db *DB) EmbeddingHealth(ctx context.Context, fingerprint string, dimension
 			h.Missing++
 		case !vectorID.Valid || !metadataID.Valid:
 			h.Orphaned++
-		case !storedDimension.Valid || storedDimension.Int64 != int64(dimension) || ValidateEmbeddingBlob(blob, dimension) != nil:
+		case !storedDimension.Valid || storedDimension.Int64 != int64(dimension) || len(blob) != dimension*4:
 			h.Orphaned++
+		case ValidateEmbeddingBlob(blob, dimension) != nil:
+			h.Corrupt++
 		case fingerprint != "" && storedFingerprint.Valid && storedFingerprint.String == fingerprint:
 			h.Current++
 		default:

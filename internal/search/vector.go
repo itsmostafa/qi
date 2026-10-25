@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -15,8 +14,9 @@ import (
 )
 
 // VectorSearch performs KNN search using pure Go cosine similarity.
-// Embeddings are loaded from the DB and compared in memory.
-// For large corpora, a dedicated vector index (sqlite-vec, etc.) is preferred.
+// Embeddings are loaded from the DB and compared in memory. Hybrid search
+// bounds the scan to BM25's candidate documents (SearchDocs); the unbounded
+// Search visits every embedded chunk and is the fallback when BM25 found none.
 type VectorSearch struct {
 	db          *db.DB
 	fingerprint string
@@ -34,8 +34,24 @@ type vecCandidate struct {
 	dist    float64
 }
 
-// Search returns up to topK results nearest to the query embedding.
+// Search returns up to topK results nearest to the query embedding, scanning
+// every embedded chunk in scope.
 func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, topK int, opts SearchOpts) ([]Result, error) {
+	return v.search(ctx, queryEmbedding, topK, opts, nil)
+}
+
+// SearchDocs is Search restricted to the chunks of docIDs. Hybrid search
+// passes BM25's candidate pool, so the scan costs the candidates' chunks
+// rather than the whole corpus. An empty docIDs returns nothing: it means no
+// candidates, not no restriction.
+func (v *VectorSearch) SearchDocs(ctx context.Context, queryEmbedding []float32, topK int, opts SearchOpts, docIDs []int64) ([]Result, error) {
+	if len(docIDs) == 0 {
+		return nil, nil
+	}
+	return v.search(ctx, queryEmbedding, topK, opts, docIDs)
+}
+
+func (v *VectorSearch) search(ctx context.Context, queryEmbedding []float32, topK int, opts SearchOpts, docIDs []int64) ([]Result, error) {
 	queryNorm, err := validateVector(queryEmbedding)
 	if err != nil {
 		return nil, fmt.Errorf("invalid query embedding: %w", err)
@@ -60,7 +76,7 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 	}
 	defer tx.Rollback()
 
-	candidates, err := v.scanCandidates(ctx, tx, queryEmbedding, queryNorm, opts)
+	candidates, err := v.scanCandidates(ctx, tx, queryEmbedding, queryNorm, opts, docIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -126,12 +142,25 @@ func (v *VectorSearch) Search(ctx context.Context, queryEmbedding []float32, top
 	return results, nil
 }
 
-// scanCandidates ranks every embedded chunk in scope against the query. It is
-// the only loop that runs once per chunk in the corpus, so it reads identity,
-// the vector, and the path the scope glob needs -- nothing else.
-func (v *VectorSearch) scanCandidates(ctx context.Context, tx *sql.Tx, queryEmbedding []float32, queryNorm float64, opts SearchOpts) ([]vecCandidate, error) {
+// scanCandidates ranks every embedded chunk in scope against the query, or
+// only the chunks of docIDs when it is non-nil. Unrestricted, it is the only
+// loop that runs once per chunk in the corpus, so it reads identity, the
+// vector, and the path the scope glob needs -- nothing else.
+func (v *VectorSearch) scanCandidates(ctx context.Context, tx *sql.Tx, queryEmbedding []float32, queryNorm float64, opts SearchOpts, docIDs []int64) ([]vecCandidate, error) {
+	from := `chunk_vectors cv
+		JOIN chunks c ON c.id = cv.chunk_id`
+	var args []any
+	if docIDs != nil {
+		// Drive from the candidate list: json_each first, then chunks through
+		// idx_chunks_doc_id. CROSS JOIN pins that order, so the planner cannot
+		// choose to walk chunk_vectors in full and filter afterwards.
+		from = `json_each(?) cand
+		CROSS JOIN chunks c ON c.doc_id = cand.value
+		JOIN chunk_vectors cv ON cv.chunk_id = c.id`
+		args = append(args, idsJSON(docIDs))
+	}
 	var collectionFilter string
-	args := []any{v.fingerprint}
+	args = append(args, v.fingerprint)
 	if opts.Collection != "" {
 		collectionFilter = "AND d.collection = ?"
 		args = append(args, opts.Collection)
@@ -146,15 +175,14 @@ func (v *VectorSearch) scanCandidates(ctx context.Context, tx *sql.Tx, queryEmbe
 			c.id,
 			d.path,
 			cv.vector
-		FROM chunk_vectors cv
-		JOIN chunks c ON c.id = cv.chunk_id
+		FROM %s
 		JOIN documents d ON d.id = c.doc_id
 		JOIN embeddings em ON em.chunk_id = cv.chunk_id
 		WHERE d.active = 1
 		  AND c.start_line >= 1 AND c.end_line >= c.start_line
 		  AND em.fingerprint = ?
 		  %s
-	`, collectionFilter)
+	`, from, collectionFilter)
 
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -187,17 +215,11 @@ func (v *VectorSearch) scanCandidates(ctx context.Context, tx *sql.Tx, queryEmbe
 }
 
 // hydrate fetches the metadata and chunk text the scan left behind, keyed by
-// chunk ID because the query returns rows in no particular order. The IDs
-// travel as one JSON array rather than a placeholder list, so an unbounded
-// caller limit cannot run into SQLite's cap on bound variables.
+// chunk ID because the query returns rows in no particular order.
 func hydrate(ctx context.Context, tx *sql.Tx, chunkIDs []int64) (map[int64]Result, error) {
 	hydrated := make(map[int64]Result, len(chunkIDs))
 	if len(chunkIDs) == 0 {
 		return hydrated, nil
-	}
-	ids, err := json.Marshal(chunkIDs)
-	if err != nil {
-		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT
@@ -215,7 +237,7 @@ func hydrate(ctx context.Context, tx *sql.Tx, chunkIDs []int64) (map[int64]Resul
 		FROM chunks c
 		JOIN documents d ON d.id = c.doc_id
 		WHERE c.id IN (SELECT value FROM json_each(?))
-	`, string(ids))
+	`, idsJSON(chunkIDs))
 	if err != nil {
 		return nil, fmt.Errorf("vector hydrate query: %w", err)
 	}

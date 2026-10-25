@@ -2,6 +2,7 @@ package search
 
 import (
 	"cmp"
+	"encoding/json"
 	"slices"
 	"strings"
 )
@@ -35,6 +36,13 @@ func dateFilterSQL(alias string, opts SearchOpts) (string, []any) {
 		args = append(args, opts.Until)
 	}
 	return sql, args
+}
+
+// idsJSON encodes ids as a JSON array for json_each, which keeps an unbounded
+// result count clear of SQLite's bind-variable cap.
+func idsJSON(ids []int64) string {
+	b, _ := json.Marshal(ids)
+	return string(b)
 }
 
 // capResults collapses duplicate snippets and keeps one result per document.

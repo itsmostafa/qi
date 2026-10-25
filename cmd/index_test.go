@@ -228,3 +228,106 @@ func (testEmbeddingProvider) Embed(_ context.Context, texts []string) ([][]float
 func (testEmbeddingProvider) ModelName() string { return "test-model" }
 
 func (testEmbeddingProvider) Dimension() int { return 4 }
+
+// Several paths in one run each become a collection and are indexed, which is
+// how a pull hook covers every collection in a repository at once.
+func TestIndexCommandIndexesSeveralPaths(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	for _, dir := range []string{first, second} {
+		if err := os.WriteFile(filepath.Join(dir, "doc.md"), []byte("# Doc\nText."), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfgPath := writeIndexTestConfig(t, "database_path: qi.db\ncollections: []\n")
+	withIndexTestConfig(t, cfgPath)
+
+	var runErr error
+	captureIndexTestOutput(t, func() { runErr = indexCmd.RunE(indexCmd, []string{first, second}) })
+	if runErr != nil {
+		t.Fatalf("index: %v", runErr)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Collections) != 2 {
+		t.Fatalf("want two collections registered, got %+v", cfg.Collections)
+	}
+	database, err := db.Open(context.Background(), cfg.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var collections int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(DISTINCT collection) FROM documents WHERE active = 1`).Scan(&collections); err != nil {
+		t.Fatal(err)
+	}
+	if collections != 2 {
+		t.Fatalf("documents indexed in %d collections, want 2", collections)
+	}
+}
+
+// A pull that deletes a collection's root deactivates its documents; a root
+// that is merely missing, with no git history of its removal, is left alone.
+func TestIndexChangedSinceDeactivatesRemovedRoot(t *testing.T) {
+	repo := gitRepo(t, map[string]string{"docs/a.md": "# A\nText.\n", "notes/b.md": "# B\nText.\n"})
+	elsewhere := t.TempDir()
+	if err := os.WriteFile(filepath.Join(elsewhere, "c.md"), []byte("# C\nText.\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeIndexTestConfig(t, "database_path: qi.db\ncollections: []\n")
+	withIndexTestConfig(t, cfgPath)
+	docs, notes := filepath.Join(repo, "docs"), filepath.Join(repo, "notes")
+	run := func(args ...string) string {
+		t.Helper()
+		var runErr error
+		out := captureIndexTestOutput(t, func() { runErr = indexCmd.RunE(indexCmd, args) })
+		if runErr != nil {
+			t.Fatalf("index %v: %v\n%s", args, runErr, out)
+		}
+		return out
+	}
+	run(docs, notes, elsewhere)
+
+	base := runGit(t, repo, "rev-parse", "HEAD")
+	runGit(t, repo, "rm", "-rq", "docs")
+	commitAll(t, repo)
+	if err := os.RemoveAll(elsewhere); err != nil {
+		t.Fatal(err)
+	}
+	indexChangedSince = base
+	t.Cleanup(func() { indexChangedSince = "" })
+	out := run(docs, notes, elsewhere)
+	if !strings.Contains(out, "Removed 1 documents") || !strings.Contains(out, "does not exist") {
+		t.Fatalf("unexpected output:\n%s", out)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(context.Background(), cfg.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	active := map[string]int{}
+	rows, err := database.QueryContext(context.Background(),
+		`SELECT collection, SUM(active) FROM documents GROUP BY collection`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		var n int
+		if err := rows.Scan(&name, &n); err != nil {
+			t.Fatal(err)
+		}
+		active[name] = n
+	}
+	if active["docs"] != 0 || active["notes"] != 1 || active[filepath.Base(elsewhere)] != 1 {
+		t.Fatalf("active documents by collection = %v", active)
+	}
+}

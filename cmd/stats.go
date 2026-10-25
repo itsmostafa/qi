@@ -101,8 +101,7 @@ var statsCmd = &cobra.Command{
 			if a.Config.Providers.Embedding == nil {
 				fmt.Fprintln(os.Stdout, "    Embeddings: not configured")
 			} else {
-				fmt.Fprintf(os.Stdout, "    Embeddings: %d current / %d missing / %d stale / %d orphaned\n",
-					s.health.Current, s.health.Missing, s.health.Stale, s.health.Orphaned)
+				fmt.Fprintf(os.Stdout, "    Embeddings: %s\n", s.health)
 			}
 		}
 		fmt.Fprintf(os.Stdout, "\n  Database size: %s\n", formatBytes(dbSize))

@@ -166,12 +166,16 @@ func TestEmbedder_ReEmbedsAfterFingerprintChange(t *testing.T) {
 	}
 }
 
+// Non-finite and zero-norm vectors are absent here on purpose: every write
+// path rejects them (db.UpsertEmbedding, db.InsertEmbedding), so the embedder
+// no longer reads each blob to look for them. db.EmbeddingHealth still
+// reports them if something outside qi writes one.
 func TestEmbedderRepairsEveryInvalidVectorState(t *testing.T) {
 	ctx := context.Background()
 	database := openTestDB(t)
 	idx := New(database, 256)
 	files := map[string]string{}
-	for _, name := range []string{"metadata-only.md", "vector-only.md", "malformed.md", "wrong-size.md", "wrong-dimension.md", "zero.md", "nan.md", "inf.md"} {
+	for _, name := range []string{"metadata-only.md", "vector-only.md", "malformed.md", "wrong-size.md", "wrong-dimension.md", "stale.md"} {
 		files[name] = "# " + name + "\nContent."
 	}
 	col := makeTestCollection(t, files)
@@ -208,12 +212,12 @@ func TestEmbedderRepairsEveryInvalidVectorState(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `UPDATE embeddings SET dimension=1 WHERE chunk_id=?`, ids["wrong-dimension.md"]); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.ExecContext(ctx, `UPDATE embeddings SET fingerprint='old' WHERE chunk_id=?`, ids["stale.md"]); err != nil {
+		t.Fatal(err)
+	}
 	corrupt := map[string][]byte{
 		"malformed.md":  {1, 2, 3},
 		"wrong-size.md": vectorBlob(1),
-		"zero.md":       vectorBlob(0, 0),
-		"nan.md":        vectorBlob(float32(math.NaN()), 1),
-		"inf.md":        vectorBlob(float32(math.Inf(1)), 1),
 	}
 	for path, blob := range corrupt {
 		if _, err := database.ExecContext(ctx, `UPDATE chunk_vectors SET vector=? WHERE chunk_id=?`, blob, ids[path]); err != nil {
@@ -225,20 +229,20 @@ func TestEmbedderRepairsEveryInvalidVectorState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if health.Current != 0 || health.Orphaned != 8 {
+	if health.Current != 0 || health.Orphaned != 5 || health.Stale != 1 {
 		t.Fatalf("invalid states classified as healthy: %+v", health)
 	}
 	if err := embedder.EmbedCollection(ctx, "test"); err != nil {
 		t.Fatalf("repair failed: %v", err)
 	}
-	if provider.calls != 1 || provider.texts != 8 {
-		t.Fatalf("expected all 8 invalid chunks to be re-embedded, calls=%d texts=%d", provider.calls, provider.texts)
+	if provider.calls != 1 || provider.texts != 6 {
+		t.Fatalf("expected all 6 invalid chunks to be re-embedded, calls=%d texts=%d", provider.calls, provider.texts)
 	}
 	health, err = database.EmbeddingHealth(ctx, "current", 2, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if health.Current != 8 || health.Missing+health.Stale+health.Orphaned != 0 {
+	if health.Current != 6 || health.Missing+health.Stale+health.Orphaned != 0 {
 		t.Fatalf("repair did not produce fully current embeddings: %+v", health)
 	}
 }

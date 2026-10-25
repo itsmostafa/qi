@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"io/fs"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,13 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Name() < entries[j].Name()
 	})
+
+	// Every open runs this, so an up-to-date database must not take the write
+	// lock: a long write in a background index run would otherwise fail every
+	// search with "database is locked". Re-checked under the lock below.
+	if applied, err := appliedVersions(ctx, db); err == nil && allApplied(applied, entries) {
+		return nil
+	}
 
 	// A write statement before reading schema_version serializes migration
 	// runners across processes. Version 0 is a transaction-local lock row: it
@@ -104,8 +112,10 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 
 // appliedVersions reads the set of migration versions already recorded.
 // Version 0 is the transaction-local lock row and is excluded.
-func appliedVersions(ctx context.Context, tx *sql.Tx) (map[int]bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT version FROM schema_version WHERE version > 0`)
+func appliedVersions(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}) (map[int]bool, error) {
+	rows, err := q.QueryContext(ctx, `SELECT version FROM schema_version WHERE version > 0`)
 	if err != nil {
 		return nil, fmt.Errorf("reading schema version: %w", err)
 	}
@@ -125,6 +135,15 @@ func appliedVersions(ctx context.Context, tx *sql.Tx) (map[int]bool, error) {
 	return applied, nil
 }
 
+func allApplied(applied map[int]bool, entries []fs.DirEntry) bool {
+	for _, entry := range entries {
+		if ver, err := parseMigrationVersion(entry.Name()); err != nil || !applied[ver] {
+			return false
+		}
+	}
+	return true
+}
+
 // addedColumns names the LAST column each ALTER TABLE migration adds, used to
 // detect a DDL-committed-but-unversioned state. It must be the last one: an
 // earlier column proves only that the migration started, and treating a torn
@@ -133,6 +152,7 @@ var addedColumns = map[int]struct{ table, column string }{
 	4: {"embeddings", "fingerprint"},
 	6: {"documents", "tags"},
 	7: {"chunks", "end_line"},
+	9: {"documents", "file_stat"},
 }
 
 func columnExists(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {

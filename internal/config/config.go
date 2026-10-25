@@ -484,15 +484,23 @@ func canonicalPath(path string) string {
 }
 
 // CanonicalPath expands a filesystem path to an absolute, symlink-resolved,
-// clean path. Symlink resolution is best effort so nonexistent paths can still
-// be compared by their cleaned absolute form.
+// clean path. A nonexistent path resolves its nearest existing ancestor, so a
+// deleted collection root still compares equal to the path it was registered
+// under (macOS's /var is /private/var).
 func CanonicalPath(path string) (string, error) {
 	abs, err := filepath.Abs(ExpandHome(path))
 	if err != nil {
 		return "", err
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = real
+	for dir, rest := abs, ""; ; {
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(real, rest), nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return abs, nil
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = parent
 	}
-	return filepath.Clean(abs), nil
 }
