@@ -304,9 +304,7 @@ const gitlinkMode = "160000"
 // revision), and the caller indexes everything.
 func docsChangedSince(ctx context.Context, col config.Collection, rev string) (bool, error) {
 	// rev is a hash from resolveRevision, which refuses option-like input.
-	// Inside a git hook, an inherited GIT_DIR would make col.Path the
-	// worktree root, widening "." to the whole repository; gitOutput strips it.
-	// Its space trimming is harmless: the output starts with ':' and ends with NUL.
+	// gitOutput's trimming is safe: the output starts with ':' and ends with NUL.
 	out, err := gitOutput(ctx, col.Path, "diff", "--raw", "-z", "--no-renames",
 		"--no-abbrev", "--ignore-submodules=none", rev, "HEAD", "--", ".")
 	if err != nil {
