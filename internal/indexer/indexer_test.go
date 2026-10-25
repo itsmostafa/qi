@@ -477,6 +477,42 @@ func TestIndexer_SkipsOversizeFile(t *testing.T) {
 	}
 }
 
+// A binary file is skipped whatever its extension, and a document whose file
+// turned binary is deactivated rather than left serving stale text.
+func TestIndexer_SkipsBinaryFile(t *testing.T) {
+	database := openTestDB(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("plain text for now\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	col := config.Collection{Name: "test", Path: dir}
+	idx := New(database, 256)
+	ctx := context.Background()
+	if _, err := idx.Index(ctx, col); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, []byte("PK\x03\x04\x00\x00binary payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := idx.Index(ctx, col)
+	if err != nil {
+		t.Fatalf("a binary file must not fail the run: %v", err)
+	}
+	if stats.FilesSkipped != 1 || stats.FilesRemoved != 1 || stats.FilesScanned != 0 {
+		t.Errorf("expected the file skipped and its document removed, got %+v", stats)
+	}
+	var docs int
+	if err := database.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM documents WHERE active = 1`).Scan(&docs); err != nil {
+		t.Fatal(err)
+	}
+	if docs != 0 {
+		t.Errorf("binary file is still searchable (%d active documents)", docs)
+	}
+}
+
 // A file whose size and mtime match what was indexed is not read again; a
 // changed mtime is enough to read it. An mtime as recent as the run is not
 // trusted, since a same-size write in the same clock tick keeps the stat.

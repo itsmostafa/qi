@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -45,6 +46,15 @@ var defaultExtensions = map[string]bool{
 // ponytail: fixed constant, no knob. A `max_file_size` key on
 // config.Collection is the upgrade path if anyone needs a different cap.
 const maxFileSize = 10 << 20 // 10 MiB
+
+// errBinary marks a file whose bytes are not text, whatever its extension.
+var errBinary = errors.New("binary file")
+
+// isBinary uses git's heuristic: a NUL byte in the first 8000 bytes. A UTF-8
+// check would also reject legitimate Latin-1 text.
+func isBinary(data []byte) bool {
+	return bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0
+}
 
 // dateLayout is the storage format of documents.doc_timestamp. The recency
 // filters compare it as a string, so it must stay lexicographically ordered.
@@ -213,6 +223,15 @@ func (idx *Indexer) Index(ctx context.Context, col config.Collection) (Stats, er
 				return root.ReadFile(rel)
 			}
 			err = idx.indexFile(ctx, col, rel, info, read, rangeRepairs[rel], &stats)
+		}
+		// Like an oversize file: skipped, and dropped from seenPaths so a
+		// document whose file turned binary is deactivated.
+		if errors.Is(err, errBinary) {
+			slog.Warn("skipping binary file", "path", rel)
+			delete(seenPaths, rel)
+			stats.FilesScanned--
+			stats.FilesSkipped++
+			return nil
 		}
 		if err != nil {
 			err = fmt.Errorf("indexing %s: %w", rel, err)
@@ -461,6 +480,9 @@ func (idx *Indexer) indexFile(ctx context.Context, col config.Collection, relPat
 	data, err := read()
 	if err != nil {
 		return err
+	}
+	if isBinary(data) {
+		return errBinary
 	}
 	hash := sha256sum(data)
 	modTime := info.ModTime()
