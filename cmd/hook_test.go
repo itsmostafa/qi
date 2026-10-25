@@ -108,10 +108,8 @@ func TestDocsChangedSince(t *testing.T) {
 		t.Fatalf("configured .rst change: got %v, %v; want true", got, err)
 	}
 
-	for _, rev := range []string{"no-such-rev", "--output=/tmp/x"} {
-		if _, err := docsChangedSince(ctx, col, rev); err == nil {
-			t.Fatalf("revision %q: expected an error so the caller indexes everything", rev)
-		}
+	if _, err := docsChangedSince(ctx, col, "no-such-rev"); err == nil {
+		t.Fatal("unknown revision: expected an error so the caller indexes everything")
 	}
 }
 

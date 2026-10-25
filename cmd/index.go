@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -82,7 +81,7 @@ Colliding names take on leading path segments until unique.`,
 		var cols []config.Collection
 		seen := map[string]bool{}
 		for _, arg := range targets {
-			col, err := resolveCollection(a, []string{arg})
+			col, err := resolveCollection(a, arg)
 			if err != nil {
 				return err
 			}
@@ -96,21 +95,17 @@ Colliding names take on leading path segments until unique.`,
 }
 
 // resolveCollection maps the [path|collection] argument shared by index and
-// hook install to a collection. A path (or no argument, meaning the current
-// directory) is registered as a new collection if config has none for it.
-func resolveCollection(a *app.App, args []string) (config.Collection, error) {
-	if len(args) == 0 || isPathArg(args[0]) {
-		arg := "."
-		if len(args) > 0 {
-			arg = args[0]
-		}
-		dir, err := resolveIndexPath(arg)
-		if err != nil {
-			return config.Collection{}, fmt.Errorf("resolving path: %w", err)
-		}
-		return autoCollection(a, dir)
+// hook install to a collection. A path is registered as a new collection if
+// config has none for it.
+func resolveCollection(a *app.App, arg string) (config.Collection, error) {
+	if !isPathArg(arg) {
+		return collectionByName(a.Config, arg)
 	}
-	return collectionByName(a.Config, args[0])
+	dir, err := resolveIndexPath(arg)
+	if err != nil {
+		return config.Collection{}, fmt.Errorf("resolving path: %w", err)
+	}
+	return autoCollection(a, dir)
 }
 
 // previewCollection resolves arg like resolveCollection but never writes
@@ -284,24 +279,18 @@ func resolveRevision(ctx context.Context, dir, rev string) (string, error) {
 	if strings.HasPrefix(rev, "-") {
 		return "", fmt.Errorf("invalid revision %q", rev)
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "-q", "--verify", rev+"^{commit}")
-	cmd.Env = gitEnv()
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	out, err := gitOutput(ctx, dir, "rev-parse", "-q", "--verify", rev+"^{commit}")
 	if err != nil {
 		// --verify -q exits 1 silently for a name that resolves to nothing;
-		// anything else (not a repository, no git) says why on stderr.
+		// anything else (not a repository, no git) says why on stderr, and
+		// gitOutput keeps the exit error only when stderr is empty.
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && stderr.Len() == 0 {
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return "", errUnknownRevision
-		}
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return "", fmt.Errorf("git rev-parse: %s", msg)
 		}
 		return "", fmt.Errorf("git rev-parse: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
 }
 
 // gitlinkMode is the tree mode of a submodule entry.
@@ -314,32 +303,24 @@ const gitlinkMode = "160000"
 // diff. An error means git could not answer (not a repository, unknown
 // revision), and the caller indexes everything.
 func docsChangedSince(ctx context.Context, col config.Collection, rev string) (bool, error) {
-	if strings.HasPrefix(rev, "-") {
-		return false, fmt.Errorf("invalid revision %q", rev)
-	}
-	cmd := exec.CommandContext(ctx, "git", "-C", col.Path, "diff", "--raw", "-z", "--no-renames",
-		"--no-abbrev", "--ignore-submodules=none", rev, "HEAD", "--", ".")
+	// rev is a hash from resolveRevision, which refuses option-like input.
 	// Inside a git hook, an inherited GIT_DIR would make col.Path the
-	// worktree root, widening "." to the whole repository.
-	cmd.Env = gitEnv()
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	// worktree root, widening "." to the whole repository; gitOutput strips it.
+	// Its space trimming is harmless: the output starts with ':' and ends with NUL.
+	out, err := gitOutput(ctx, col.Path, "diff", "--raw", "-z", "--no-renames",
+		"--no-abbrev", "--ignore-submodules=none", rev, "HEAD", "--", ".")
 	if err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return false, fmt.Errorf("git diff: %s", msg)
-		}
 		return false, fmt.Errorf("git diff: %w", err)
 	}
 	// Each entry is ":srcmode dstmode srcsha dstsha status" NUL path NUL.
 	exts := indexer.AllowedExtensions(col)
-	fields := bytes.Split(bytes.TrimSuffix(out, []byte{0}), []byte{0})
+	fields := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
 	for i := 0; i+1 < len(fields); i += 2 {
-		modes := strings.Fields(strings.TrimPrefix(string(fields[i]), ":"))
+		modes := strings.Fields(strings.TrimPrefix(fields[i], ":"))
 		if len(modes) >= 2 && (modes[0] == gitlinkMode || modes[1] == gitlinkMode) {
 			return true, nil
 		}
-		if exts[strings.ToLower(filepath.Ext(string(fields[i+1])))] {
+		if exts[strings.ToLower(filepath.Ext(fields[i+1]))] {
 			return true, nil
 		}
 	}

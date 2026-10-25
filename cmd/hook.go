@@ -146,7 +146,7 @@ prints the line to add to them.`,
 		}
 
 		known := len(a.Config.Collections)
-		col, err := resolveCollection(a, args)
+		col, err := resolveCollection(a, arg)
 		if err != nil {
 			return err
 		}
