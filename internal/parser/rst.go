@@ -24,16 +24,10 @@ const rstAdornmentChars = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 // characters (grid-table borders like "+---+") do not qualify.
 func rstAdornment(line string) (byte, int, bool) {
 	line = strings.TrimRight(line, " \t")
-	if line == "" || !strings.ContainsRune(rstAdornmentChars, rune(line[0])) {
+	if line == "" || !strings.ContainsRune(rstAdornmentChars, rune(line[0])) || strings.Trim(line, line[:1]) != "" {
 		return 0, 0, false
 	}
-	c := line[0]
-	for i := 1; i < len(line); i++ {
-		if line[i] != c {
-			return 0, 0, false
-		}
-	}
-	return c, len(line), true
+	return line[0], len(line), true
 }
 
 func rstIndented(line string) bool {
