@@ -292,7 +292,8 @@ func TestPlanHookRun(t *testing.T) {
 		{Name: "handbook", Path: filepath.Join(repo, "handbook")},
 		{Name: "elsewhere", Path: t.TempDir()},
 		{Name: "sibling", Path: sibling},
-		// Deleted by a pull: skipped, or it would fail the other collections' run.
+		// Missing: passed only with a base, which lets qi index confirm in git
+		// that the pull deleted it; without one it would fail the whole run.
 		{Name: "removed", Path: filepath.Join(repo, "removed")},
 	}}
 	wantPaths := []string{filepath.Join(canonicalRepo, "docs"), filepath.Join(canonicalRepo, "handbook")}
@@ -352,7 +353,7 @@ func TestPlanHookRun(t *testing.T) {
 	runGit(t, repo, "checkout", "-q", "-")
 	mainHead := runGit(t, repo, "rev-parse", "HEAD")
 	runGit(t, repo, "merge", "-q", "--no-ff", "--no-edit", "side")
-	if p := plan("post-commit", load); p.Base != mainHead || len(p.Paths) != 2 {
+	if p := plan("post-commit", load); p.Base != mainHead || len(p.Paths) != 3 {
 		t.Fatalf("merge commit: got %+v, want base %s", p, mainHead)
 	}
 

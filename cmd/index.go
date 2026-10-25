@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,6 +51,7 @@ Colliding names take on leading path segments until unique.`,
 		// renamed collection waits for app.New, which first moves a legacy
 		// name's rows to the normalized name.
 		var targets []string
+		var removed []config.Collection
 		for _, arg := range args {
 			col, err := previewCollection(cfg, arg)
 			if err != nil {
@@ -57,12 +59,25 @@ Colliding names take on leading path segments until unique.`,
 			}
 			// Decide before waiting on another run: the hook passes ORIG_HEAD,
 			// which the next pull overwrites while this run waits.
-			if indexChangedSince != "" && !changedSince(ctx, col, indexChangedSince) {
-				continue
+			if indexChangedSince != "" {
+				// A missing root is only taken as deleted on git's word: an
+				// unmounted volume looks the same to stat, and deactivated
+				// documents are dropped for good by the next run.
+				if _, err := os.Stat(col.Path); errors.Is(err, fs.ErrNotExist) {
+					if rootRemovedSince(ctx, col.Path, indexChangedSince) {
+						removed = append(removed, col)
+					} else {
+						fmt.Printf("Skipping %q: %s does not exist (qi delete %s removes it)\n", col.Name, col.Path, col.Name)
+					}
+					continue
+				}
+				if !changedSince(ctx, col, indexChangedSince) {
+					continue
+				}
 			}
 			targets = append(targets, arg)
 		}
-		if len(targets) == 0 {
+		if len(targets) == 0 && len(removed) == 0 {
 			return nil
 		}
 		unlock, err := db.LockIndex(cfg.DatabasePath, func() {
@@ -78,6 +93,13 @@ Colliding names take on leading path segments until unique.`,
 			return err
 		}
 		defer a.Close()
+		for _, col := range removed {
+			n, err := a.DB.DeactivateCollection(ctx, col.Name)
+			if err != nil {
+				return fmt.Errorf("deactivating collection %q: %w", col.Name, err)
+			}
+			fmt.Printf("Removed %d documents from %q: %s was deleted since %s\n", n, col.Name, col.Path, indexChangedSince)
+		}
 		var cols []config.Collection
 		seen := map[string]bool{}
 		for _, arg := range targets {
@@ -116,11 +138,13 @@ func previewCollection(cfg *config.Config, arg string) (config.Collection, error
 	if err != nil {
 		return config.Collection{}, fmt.Errorf("resolving path: %w", err)
 	}
-	if _, err := os.Stat(dir); err != nil {
-		return config.Collection{}, fmt.Errorf("path %q does not exist", dir)
-	}
+	// A registered collection resolves even when its root is gone, so a pull
+	// that deleted it can deactivate its documents.
 	if existing := findCollectionByPath(cfg.Collections, dir); existing != nil {
 		return *existing, nil
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return config.Collection{}, fmt.Errorf("path %q does not exist", dir)
 	}
 	return config.Collection{Name: newCollectionName(cfg.Collections, dir), Path: dir}, nil
 }
@@ -290,6 +314,34 @@ func resolveRevision(ctx context.Context, dir, rev string) (string, error) {
 		return "", fmt.Errorf("git rev-parse: %w", err)
 	}
 	return out, nil
+}
+
+// rootRemovedSince reports whether root, missing on disk, is a path git tracked
+// at rev and no longer tracks at HEAD: the change from rev deleted it. Git runs
+// from root's nearest existing ancestor, since `git -C` needs a directory.
+func rootRemovedSince(ctx context.Context, root, rev string) bool {
+	dir, rel := root, "."
+	for {
+		if _, err := os.Stat(dir); err == nil {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		rel = filepath.Join(filepath.Base(dir), rel)
+		dir = parent
+	}
+	sha, err := resolveRevision(ctx, dir, rev)
+	if err != nil {
+		return false
+	}
+	// ls-tree paths are relative to the working directory, like rel.
+	tracked := func(commit string) bool {
+		out, err := gitOutput(ctx, dir, "ls-tree", "--name-only", commit, "--", rel)
+		return err == nil && out != ""
+	}
+	return tracked(sha) && !tracked("HEAD")
 }
 
 // gitlinkMode is the tree mode of a submodule entry.

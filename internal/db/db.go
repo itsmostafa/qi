@@ -192,6 +192,18 @@ func (db *DB) DeleteCollection(ctx context.Context, name string) error {
 	return tx.Commit()
 }
 
+// DeactivateCollection marks every active document in the collection inactive,
+// as an index run does for a file deleted from disk; the next run's compaction
+// drops them. It returns how many documents it deactivated.
+func (db *DB) DeactivateCollection(ctx context.Context, name string) (int64, error) {
+	res, err := db.ExecContext(ctx,
+		`UPDATE documents SET active=0, updated_at=datetime('now') WHERE collection=? AND active=1`, name)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // RenameCollectionData merges indexed data from oldName into newName.
 //
 // A document is a duplicate only when the destination holds the same relative
