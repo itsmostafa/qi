@@ -7,8 +7,8 @@ import (
 
 // mdxJSXTagLine matches a line made only of JSX tags: "<Foo />", "</Foo>",
 // "<Foo prop="x">", fragments, and several tags in a row. Quoted values and
-// {expressions} may hold "<" or ">".
-var mdxJSXTagLine = regexp.MustCompile(`^\s*(<\s*/?\s*([A-Za-z][\w.:-]*)?(\s(?:[^<>"'{}]|"[^"]*"|'[^']*'|\{[^{}]*\})*)?/?\s*>\s*)+$`)
+// {expressions}, nested one level as in style={{...}}, may hold "<" or ">".
+var mdxJSXTagLine = regexp.MustCompile(`^\s*(<\s*/?\s*([A-Za-z][\w.:-]*)?(\s(?:[^<>"'{}]|"[^"]*"|'[^']*'|\{(?:[^{}]|\{[^{}]*\})*\})*)?/?\s*>\s*)+$`)
 
 // mdxESMStart matches the first line of an ESM import or export statement.
 var mdxESMStart = regexp.MustCompile(`^(import|export)([\s{*'"]|$)`)

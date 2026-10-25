@@ -453,7 +453,7 @@ func TestMDXDropsESMAndIndexesJSXChildren(t *testing.T) {
 // A ">" or "<" inside an attribute value must not keep the tag line from
 // being blanked, or goldmark folds the children into a discarded HTML block.
 func TestMDXTagWithAngleBracketAttribute(t *testing.T) {
-	for _, attr := range []string{`label="A > B"`, `label='A < B'`, `onClick={() => go()}`} {
+	for _, attr := range []string{`label="A > B"`, `label='A < B'`, `onClick={() => go()}`, `style={{ color: "red" }}`, `onClick={() => go({a: 1})}`} {
 		body := bodyText(parseWith(t, "g.mdx", "# H\n\n<Tabs>\n<TabItem "+attr+">\ntight child text\n</TabItem>\n</Tabs>\n"))
 		if !strings.Contains(body, "tight child text") || strings.Contains(body, "TabItem") {
 			t.Errorf("%s: body = %q", attr, body)
