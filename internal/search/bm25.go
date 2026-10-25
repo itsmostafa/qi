@@ -3,7 +3,6 @@ package search
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode"
@@ -171,13 +170,6 @@ func (b *BM25) searchFTS(ctx context.Context, opts SearchOpts, ftsQuery string) 
 		}
 	}
 	return results, nil
-}
-
-// idsJSON encodes ids as a JSON array for json_each, which keeps an unbounded
-// result count clear of SQLite's bind-variable cap.
-func idsJSON(ids []int64) string {
-	b, _ := json.Marshal(ids)
-	return string(b)
 }
 
 // addSnippets fills in the highlighted snippet of each result's chunk.

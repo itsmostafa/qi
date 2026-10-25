@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -155,14 +154,10 @@ func (v *VectorSearch) scanCandidates(ctx context.Context, tx *sql.Tx, queryEmbe
 		// Drive from the candidate list: json_each first, then chunks through
 		// idx_chunks_doc_id. CROSS JOIN pins that order, so the planner cannot
 		// choose to walk chunk_vectors in full and filter afterwards.
-		ids, err := json.Marshal(docIDs)
-		if err != nil {
-			return nil, err
-		}
 		from = `json_each(?) cand
 		CROSS JOIN chunks c ON c.doc_id = cand.value
 		JOIN chunk_vectors cv ON cv.chunk_id = c.id`
-		args = append(args, string(ids))
+		args = append(args, idsJSON(docIDs))
 	}
 	var collectionFilter string
 	args = append(args, v.fingerprint)
@@ -220,17 +215,11 @@ func (v *VectorSearch) scanCandidates(ctx context.Context, tx *sql.Tx, queryEmbe
 }
 
 // hydrate fetches the metadata and chunk text the scan left behind, keyed by
-// chunk ID because the query returns rows in no particular order. The IDs
-// travel as one JSON array rather than a placeholder list, so an unbounded
-// caller limit cannot run into SQLite's cap on bound variables.
+// chunk ID because the query returns rows in no particular order.
 func hydrate(ctx context.Context, tx *sql.Tx, chunkIDs []int64) (map[int64]Result, error) {
 	hydrated := make(map[int64]Result, len(chunkIDs))
 	if len(chunkIDs) == 0 {
 		return hydrated, nil
-	}
-	ids, err := json.Marshal(chunkIDs)
-	if err != nil {
-		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT
@@ -248,7 +237,7 @@ func hydrate(ctx context.Context, tx *sql.Tx, chunkIDs []int64) (map[int64]Resul
 		FROM chunks c
 		JOIN documents d ON d.id = c.doc_id
 		WHERE c.id IN (SELECT value FROM json_each(?))
-	`, string(ids))
+	`, idsJSON(chunkIDs))
 	if err != nil {
 		return nil, fmt.Errorf("vector hydrate query: %w", err)
 	}

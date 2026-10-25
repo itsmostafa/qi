@@ -138,17 +138,25 @@ func (h *Hybrid) vectorCandidates(ctx context.Context, opts SearchOpts, bm25Resu
 	if len(bm25Results) >= pool {
 		return ids, nil
 	}
-	wider, err := h.bm25.CandidateDocs(ctx, opts, vecTopK)
+	anyTerm := sanitizeFTSQueryAny(opts.Query)
+	if anyTerm == "" {
+		return ids, nil
+	}
+	// searchFTS stops at Pool distinct documents and fetches snippets for
+	// those alone, so widening costs at most vecTopK snippets.
+	wideOpts := opts
+	wideOpts.TopK, wideOpts.Pool, wideOpts.Passages = 0, vecTopK, 0
+	wider, err := h.bm25.searchFTS(ctx, wideOpts, anyTerm)
 	if err != nil {
 		return nil, err
 	}
-	for _, id := range wider {
+	for _, r := range wider {
 		if len(ids) >= vecTopK {
 			break
 		}
-		if !seen[id] {
-			seen[id] = true
-			ids = append(ids, id)
+		if !seen[r.DocID] {
+			seen[r.DocID] = true
+			ids = append(ids, r.DocID)
 		}
 	}
 	return ids, nil
