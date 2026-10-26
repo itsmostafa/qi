@@ -8,23 +8,21 @@
   <img src="assets/img/qi-logo.png" alt="qi logo" width="200" />
 </p>
 
-Save tokens by delegating some of your AI Agent's work to qi. Agent skills included.
+qi indexes your notes and docs into one local SQLite file and answers searches with the exact file and line range of each match, so you and your AI agents can find and cite the right passage without reading whole files. It runs on macOS and Linux, offline.
 
-- ⚡ Ultra-fast indexing
-- ⚡ Lower tokens + latency
-- 🧠 Better reasoning (agents focus on thinking, not retrieval)
-- 🔒 Fully local + offline
-- 🧩 Works with Ollama, LM Studio, Claude, OpenAI, MLX, etc.
+```console
+$ qi search "rollback"
+1. Deploy runbook (bm25: 0.0000) [2026-09-01]
+   qi://notes/runbook.md#L9-L9 [Deploy runbook > Rollback]
+   qi get 92256d662922d88001924aa57cd56370da30237c5d8d9a870fcd0c9efc347486 --lines 9:9
+   To roll back a deploy, run make rollback and confirm the previous tag.
+```
 
+## Why qi
 
-## Features
+An agent that answers questions about your notes usually greps the tree and then reads every file that matched. Each file it opens costs tokens and a round trip, and most of what it reads is irrelevant.
 
-- **Blazing-fast full-text search** — BM25 via SQLite FTS5, no external search engine required
-- **Flexible vector search** — embeddings stored and queried on your machine; works with Ollama, LM Studio, llama.cpp, or OpenAI's SOTA models.
-- **Hybrid search with RRF fusion** — combines BM25 and vector rankings for results that are both precise and semantically aware
-- **Smart chunking** — breakpoint scoring prioritizes headings, code fences, and paragraph boundaries so chunks stay meaningful, not arbitrary
-- **Zero-dependency storage** — a single SQLite file holds your entire index; content-addressable blobs (SHA-256) eliminate duplicates automatically
-- **Works offline, always** — vector search is an optional enhancement; BM25 search works out of the box with no providers configured
+qi does the retrieval up front. `qi index` splits each document into chunks at headings, code fences and paragraph breaks, and stores them in a SQLite database. A search returns one ranked hit per document, each with a snippet, its heading path and a line range. The agent then fetches only those lines with `qi get`. The repository ships an [agent skill](skills/qi-cli/SKILL.md) and a Claude Code plugin that teach an agent this workflow.
 
 ## Install
 
@@ -32,145 +30,135 @@ Save tokens by delegating some of your AI Agent's work to qi. Agent skills inclu
 curl -fsSL https://raw.githubusercontent.com/itsmostafa/qi/main/install.sh | sh
 ```
 
-The script detects your OS and architecture, and installs the
-latest release.
-Run `qi update` later to upgrade in place.
+The script downloads the latest release for macOS or Linux (amd64 or arm64), checks it against the release's SHA-256 checksums, and installs it to `~/.local/bin`. Set `QI_INSTALL_DIR` to install somewhere else. If that directory is not on your `PATH`, the script says so.
 
-Or via `go install`:
+Run `qi update` later to replace the binary with the latest release. If its directory is not writable, run `sudo qi update`.
+
+With a Go toolchain you can build from source instead:
 
 ```sh
 go install github.com/itsmostafa/qi@latest
 ```
 
-### Claude Code Plugin
-
-qi is available as a Claude Code plugin. Add the marketplace and install with:
+### Claude Code plugin
 
 ```
-# Add the marketplace
 /plugin marketplace add itsmostafa/qi
-
-# Install the plugin
 /plugin install qi
 ```
 
 ## Quickstart
 
 ```sh
-# Initialize config and database
-qi init
-
-# Index current directory
-qi index
-
-# Or index a specific path
-qi index ~/notes
-
-# Collection names are generated from paths
-# ~/notes -> notes
-
-# Re-index it later by generated collection name
-qi index notes
-
-# Search
-qi search "my query"
-
-# Search a specific collection
-qi search "my query" -c notes
-
-# Hybrid search (BM25 + vector, requires embedding provider)
-qi query "my query" --mode hybrid
-
-# Hybrid search a specific collection
-qi query "my query" --mode hybrid -c notes
-
-# List all collections
-qi list
-
-# Delete a collection and all its indexed data
-qi delete notes
-
-# Health check
-qi doctor
-
-# Keep a collection inside a git repo indexed after every pull
-qi hook install ~/src/monorepo
+qi init                 # write ~/.config/qi/config.yaml and create the database
+qi index ~/notes        # index a directory; it becomes the collection "notes"
+qi search "rollback"    # keyword search across every collection
 ```
+
+`qi init` writes a sample collection pointing at `~/notes`. Edit or delete it if you keep your notes elsewhere; `qi doctor` reports a failed check for any collection whose path does not exist.
+
+Then try:
+
+```sh
+qi index                                   # index the current directory
+qi index notes                             # re-index a collection by name
+qi search "rollback" -c notes              # search one collection
+qi search "rollback" --path 'meetings/*'   # only paths matching a glob
+qi search "rollback" --since 2026-09-01    # only documents dated on or after
+qi search "rollback" -f json               # JSON output for scripts and agents
+qi query "how do I undo a release"         # hybrid search, needs an embedding provider
+qi hook install ~/src/monorepo             # re-index after every git pull
+```
+
+## How search works
+
+qi has two ways to rank chunks and a third that combines them.
+
+- **Keyword search (BM25).** BM25 is the standard keyword-ranking formula: a chunk scores higher when it contains your terms often and when those terms are rare across the corpus. qi uses SQLite's built-in FTS5 full-text index for it. It needs no setup. If every term must match and nothing does, qi retries with any term matching.
+- **Vector search.** An embedding model turns each chunk and your query into a list of numbers that encodes meaning, and qi ranks chunks by how close their vectors are to the query's. Two passages can match this way with no words in common, such as "undo a release" and "roll back a deploy". It needs an embedding provider (see [Configuration](#configuration)).
+- **Hybrid search.** `qi query` runs both and merges the two rankings with Reciprocal Rank Fusion (RRF), which scores each document by its rank in each list, so a document near the top of either list ranks well. To stay fast, the vector side scores only the documents keyword search found (topped up with documents matching any query term when that list is short), and scans every chunk only when no document matches any term. On a 424,000-chunk test corpus that took a hybrid query from 1.41 seconds to 0.01 to 0.06 seconds. The cost: a document with no query term in it cannot surface through vector search.
+
+`qi search` is always keyword search. `qi query` takes `--mode lexical` or `--mode hybrid` (`deep` is an alias for `hybrid`); the default comes from `search.default_mode` in the config, which is `hybrid`. Without an embedding provider, `qi query` prints a warning and falls back to keyword search. Add `--explain` to see each hit's BM25 rank, vector rank and RRF score:
+
+```sh
+qi query "chunking algorithm" --explain
+```
+
+## What qi gives you
+
+- **Cited results.** Every hit carries a SHA-256 content hash, a `qi://collection/path` URI and a 1-indexed line range, so an answer can point at its source.
+- **One result per document.** A long file with many matching chunks takes one slot, at its best chunk, instead of crowding out other documents. `--passages N` (0 to 5) adds up to N more matching passages under that hit.
+- **Date filters.** `--since`, `--until` and `--sort date` use the document's frontmatter date (`date`, `timestamp` or `created`), or the file's modification time when there is none.
+- **Fast re-indexing.** Files whose size and modification time have not changed are not read again. On a 424,000-chunk corpus a re-index with no changes took 0.9 seconds.
+- **Formats.** Markdown (`.md`, `.markdown`), MDX (`.mdx`), reStructuredText (`.rst`), AsciiDoc (`.adoc`, `.asciidoc`) and plain text (`.txt`, `.text`). Headings become each chunk's heading path. YAML frontmatter and AsciiDoc header attributes supply the title, date and tags.
+- **Indexing on git pull.** `qi hook install` adds git hooks that start a background `qi index` after a pull that changed indexed files, for every collection in that repository.
+- **Local and offline.** The index is one SQLite file. Keyword search needs nothing else. Vector search works with any embedding server that speaks the OpenAI `/v1/embeddings` API, including local ones such as Ollama, llama.cpp and LM Studio.
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `qi init` | Create config and database |
-| `qi index [path\|collection]` | Index directory (current dir by default) or collection |
-| `qi search <query>` | BM25 full-text search |
-| `qi query <query>` | Hybrid search (BM25 + vector) |
-| `qi get <hash>` | Retrieve indexed source by full content hash or unambiguous prefix (`--lines A:B`, `--max-bytes N`) |
-| `qi list` | List all collections |
-| `qi delete <collection>` | Delete a collection and all its indexed data |
-| `qi stats` | Show index statistics |
-| `qi doctor` | Health check |
-| `qi hook install [path\|collection]` | Reindex a repository's collections in the background after every `git pull` |
+| `qi init` | Write a default config (if none exists) and create the database |
+| `qi index [path\|collection]...` | Index directories or configured collections (current directory by default). `--force` rebuilds unchanged files, which you need after an upgrade that changes parsing |
+| `qi search <query>` | Keyword (BM25) search |
+| `qi query <query>` | Hybrid or keyword search (`--mode`, `--explain`) |
+| `qi get <hash>` | Print an indexed document by content hash or unambiguous prefix (`--lines A:B`, `--max-bytes N`) |
+| `qi list` | List collections |
+| `qi delete <collection>` | Remove a collection from the config and delete its indexed data |
+| `qi stats` | Documents, chunks and embedding coverage per collection, plus database size |
+| `qi doctor` | Check the config, database, collection paths and embedding coverage |
+| `qi hook install [path\|collection]` | Install git hooks that re-index a repository's collections after every pull |
+| `qi update` | Replace qi with the latest GitHub release |
 
-## Search Modes
+`search` and `query` share these flags: `-c/--collection`, `-n/--limit` (default 10), `--path <glob>`, `--since YYYY-MM-DD`, `--until YYYY-MM-DD`, `--sort relevance|date` and `--passages N`. Every command takes `-f/--format text|json|markdown` and `--config <file>`.
 
-`qi query` supports three modes via `--mode`, defaulting to `search.default_mode` from the config:
+## Collections
 
-- **`lexical`**: BM25 full-text search only
-- **`hybrid`** (default): BM25 + vector search fused with Reciprocal Rank Fusion (RRF)
-- **`deep`**: alias for `hybrid`
+A collection is a directory qi indexes. Its name is the directory's own name: `~/notes` becomes `notes`, and `/Users/alice/Projects/tools/qi` becomes `qi`. When two collections would share a name, each takes on leading path segments until the names differ, so `~/work/notes` and `~/personal/notes` become `work-notes` and `personal-notes`. Indexing a new path saves it to the config as a collection.
 
-Use `--explain` to see scoring breakdown:
+qi always skips common tool and build directories (`.git`, `node_modules`, `vendor`, `target`, `dist`, `build`, `.venv` and others), files over 10 MiB, and binary files. A collection's `ignore` list adds glob patterns to skip.
 
-```sh
-qi query "chunking algorithm" --mode hybrid --explain
-```
-
-## Documentation
-
-Full documentation is in the [`docs/`](docs/) directory:
-
-- [`docs/architecture.md`](docs/architecture.md) — system architecture, data flows, and design decisions
-- [`docs/configuration.md`](docs/configuration.md) — all config options with explanations
-- [`docs/config.example.yaml`](docs/config.example.yaml) — fully annotated example config
-- [`docs/named-collections.md`](docs/named-collections.md) — collections guide
+See [`docs/named-collections.md`](docs/named-collections.md) for more.
 
 ## Configuration
 
-The config lives at `~/.config/qi/config.yaml`. See [`docs/configuration.md`](docs/configuration.md) for all options or [`docs/config.example.yaml`](docs/config.example.yaml) for a fully annotated example.
+The config lives at `~/.config/qi/config.yaml` (or `$XDG_CONFIG_HOME/qi/config.yaml`) and the database at `~/.local/share/qi/qi.db` (or `$XDG_DATA_HOME/qi/qi.db`). Paths may start with `~`, and relative paths resolve against the config file's directory.
 
 ```yaml
 database_path: ~/.local/share/qi/qi.db
 
 collections:
-  - name: notes
-    path: ~/notes
-    extensions: [.md, .txt]   # also .markdown, .mdx, .rst, .adoc; see docs/configuration.md
+  - path: ~/notes
+    # Without this list qi indexes .md, .markdown, .txt and .text only.
+    # List .mdx, .rst, .adoc or .asciidoc here to index those formats.
+    extensions: [.md, .mdx, .rst, .adoc, .txt]
+    ignore: [drafts, "*.tmp"]
 
 providers:
-  # Local (Ollama / llama.cpp)
+  # A local Ollama server
   embedding:
     name: ollama
     base_url: http://localhost:11434
     model: nomic-embed-text
     dimension: 768
 
-  # Or: OpenAI cloud (set OPENAI_API_KEY in your environment)
+  # Or OpenAI: base_url and api_key default to https://api.openai.com
+  # and the OPENAI_API_KEY environment variable.
   # embedding:
   #   name: openai
   #   model: text-embedding-3-small
   #   dimension: 1536
-  #   batch_size: 32
 ```
+
+With an embedding provider configured, `qi index` embeds new and changed chunks in the same run, 32 per request unless you set `batch_size`. `base_url` and `api_key` can reference environment variables as `${VAR}`.
+
+- [`docs/configuration.md`](docs/configuration.md): every option, with examples for Ollama, llama.cpp, LM Studio, OpenAI and other compatible servers
+- [`docs/config.example.yaml`](docs/config.example.yaml): an annotated example config
+- [`docs/architecture.md`](docs/architecture.md): system architecture, data flow and design decisions
 
 ## Retrieving and citing search hits
 
-Every `search` and `query` hit includes a full SHA-256 `hash`, a `source_uri`
-identifying its collection/path, and 1-indexed, inclusive `start_line` and
-`end_line` ranges in the original indexed source. The hash identifies the source
-version; cite the URI, hash, and line range together. Integer `doc_id`/`chunk_id`
-fields are internal IDs, not arguments to `get`. If you override `--config`,
-use the same config for search and retrieval.
+Every `search` and `query` hit includes a full SHA-256 `hash`, a `source_uri` identifying its collection and path, and 1-indexed, inclusive `start_line` and `end_line` values in the original indexed source. The hash identifies the version of the source; cite the URI, hash and line range together. The integer `doc_id` and `chunk_id` fields are internal IDs, not arguments to `get`. If you pass `--config`, use the same config for search and retrieval.
 
 ```sh
 qi search "deployment" --format json
@@ -178,28 +166,21 @@ qi search "deployment" --format json
 qi get <hash> --lines <start_line>:<end_line>
 qi get <hash> --max-bytes 4096
 
-# Include up to two additional matching passages per document:
+# Include up to two more matching passages per document:
 qi query "deployment" --passages 2 --format json
 ```
 
-`--passages` accepts 0–5 (default 0), without giving a document extra result slots
-or ranking votes. Supporting passages inherit the parent hit's hash and source
-URI. Ranges cover the source behind each chunk, not just highlighted words;
-Markdown syntax and frontmatter remain present when retrieved.
+Extra passages do not take result slots or add ranking weight. They inherit the parent hit's hash and source URI. Line ranges cover the source text behind each chunk, not only the highlighted words, so Markdown syntax and frontmatter are present when you retrieve them.
 
-`get` reads the **indexed snapshot**, not the live file. Editing a file does not
-change that snapshot until reindexing. Old hashes are not retained as revision
-history after replacement/deletion and index compaction. A hash alone does not
-prove the current file is unchanged.
+`get` reads the **indexed snapshot**, not the live file. Editing a file leaves the snapshot unchanged until you re-index. qi does not keep old versions: once a file is replaced or deleted and the index is compacted, its old hash no longer resolves. A hash alone does not prove the current file is unchanged.
 
-Unambiguous hash prefixes (such as `abc123`) also work. Identical content at
-multiple paths is returned once, with other locations in `also_at`; use the
-search hit's `source_uri` to retain the intended citation identity. Prefixes
-matching different content hashes are errors.
+Unambiguous hash prefixes such as `abc123` also work; a prefix that matches more than one content hash is an error. Identical content at several paths is returned once, with the other locations in `also_at`, so keep the search hit's `source_uri` as the citation.
 
-Search skips chunks with missing or invalid source ranges. After upgrading an
-older index, run `qi index <collection>` to repair them. If the collection is no
-longer in config, index its source directory with `qi index /path/to/directory`.
+Search skips chunks with missing or invalid line ranges. After upgrading from an older index, run `qi index <collection>` to repair them. If the collection is no longer in the config, index its directory with `qi index /path/to/directory`.
+
+## Contributing
+
+Bug reports and pull requests are welcome on [GitHub](https://github.com/itsmostafa/qi/issues). Run `task check` (`go vet` plus `go test ./...`) before opening a pull request.
 
 ## License
 
