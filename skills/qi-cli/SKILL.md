@@ -15,7 +15,7 @@ qi search "your query"                    # BM25 keyword search (no provider nee
 qi query "your semantic question"         # Hybrid search; keyword-only, with a warning, if no provider is configured
 ```
 
-Every command except `qi init` needs a config file, so run `qi init` first.
+`index`, `search`, `query`, `get`, `list`, `stats`, `delete` and `hook` need a config file, so run `qi init` first. `qi update`, `--version` and `--help` work without one, and `qi doctor` reports a missing file as a failed check.
 
 ---
 
@@ -315,4 +315,4 @@ qi query "your question" --explain
 ```
 This shows each result's BM25 rank, vector rank, and fused RRF score. If every result is missing a vector rank, the vector path isn't contributing — confirming one of the issues above.
 
-**Note:** hybrid mode also skips vector search if the top BM25 score is more than 3× the second result (intentional optimization for dominant keyword matches). If your queries are exact keyword matches, try a more paraphrased, natural-language query to avoid this shortcut. Vector scoring also covers only documents BM25 found as candidates, so a document with no word in common with the query cannot be pulled in by meaning alone.
+**Note:** hybrid mode also skips vector search if the top BM25 score is more than 3× the second result (intentional optimization for dominant keyword matches). If your queries are exact keyword matches, try a more paraphrased, natural-language query to avoid this shortcut. When BM25 finds at least one candidate, vector scoring covers only those candidates, so a document with no word in common with the query cannot be pulled in by meaning alone. When BM25 finds nothing, qi scans every embedded chunk, and such a document can surface.

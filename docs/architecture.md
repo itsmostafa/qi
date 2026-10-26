@@ -1,6 +1,6 @@
 # Architecture
 
-qi indexes directories of text documents into a single SQLite database file and searches them from the command line. The database lives at `$XDG_DATA_HOME/qi/qi.db`, or `~/.local/share/qi/qi.db` when that variable is unset, and holds the document bodies, the search index and any embeddings. Keyword search needs no configuration. Vector search is added when the config names an embedding provider, which is any server that speaks the OpenAI-compatible `/v1/embeddings` API (Ollama, llama.cpp, OpenAI).
+qi indexes directories of text documents into a single SQLite database file and searches them from the command line. The database lives at the config's `database_path`; the file `qi init` writes sets it to `~/.local/share/qi/qi.db`, and only when `database_path` is omitted does qi use `$XDG_DATA_HOME/qi/qi.db` (or `~/.local/share/qi/qi.db` when that variable is unset). It holds the document bodies, the search index and any embeddings. Keyword search needs no configuration. Vector search is added when the config names an embedding provider, which is any server that speaks the OpenAI-compatible `/v1/embeddings` API (Ollama, llama.cpp, OpenAI).
 
 ## Diagram
 

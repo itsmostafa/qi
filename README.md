@@ -76,7 +76,7 @@ qi has two ways to rank chunks and a third that combines them.
 
 - **Keyword search (BM25).** BM25 is the standard keyword-ranking formula: a chunk scores higher when it contains your terms often and when those terms are rare across the corpus. qi uses SQLite's built-in FTS5 full-text index for it. It needs no setup. If every term must match and nothing does, qi retries with any term matching.
 - **Vector search.** An embedding model turns each chunk and your query into a list of numbers that encodes meaning, and qi ranks chunks by how close their vectors are to the query's. Two passages can match this way with no words in common, such as "undo a release" and "roll back a deploy". It needs an embedding provider (see [Configuration](#configuration)).
-- **Hybrid search.** `qi query` runs both and merges the two rankings with Reciprocal Rank Fusion (RRF), which scores each document by its rank in each list, so a document near the top of either list ranks well. To stay fast, the vector side scores only the documents keyword search found (topped up with documents matching any query term when that list is short), and scans every chunk only when no document matches any term. On a 424,000-chunk test corpus that took a hybrid query from 1.41 seconds to 0.01 to 0.06 seconds. The cost: a document with no query term in it cannot surface through vector search.
+- **Hybrid search.** `qi query` runs both and merges the two rankings with Reciprocal Rank Fusion (RRF), which scores each document by its rank in each list, so a document near the top of either list ranks well. To stay fast, the vector side scores only the documents keyword search found (topped up with documents matching any query term when that list is short), and scans every chunk only when no document matches any term. On a 424,000-chunk test corpus that took a hybrid query from 1.41 seconds to 0.01 to 0.06 seconds. The cost: when keyword search finds any match, a document with no query term in it cannot surface through vector search; it can only when keyword search finds nothing.
 
 `qi search` is always keyword search. `qi query` takes `--mode lexical` or `--mode hybrid` (`deep` is an alias for `hybrid`); the default comes from `search.default_mode` in the config, which is `hybrid`. Without an embedding provider, `qi query` prints a warning and falls back to keyword search. Add `--explain` to see each hit's BM25 rank, vector rank and RRF score:
 
@@ -122,7 +122,7 @@ See [`docs/named-collections.md`](docs/named-collections.md) for more.
 
 ## Configuration
 
-The config lives at `~/.config/qi/config.yaml` (or `$XDG_CONFIG_HOME/qi/config.yaml`) and the database at `~/.local/share/qi/qi.db` (or `$XDG_DATA_HOME/qi/qi.db`). Paths may start with `~`, and relative paths resolve against the config file's directory.
+The config lives at `~/.config/qi/config.yaml` (or `$XDG_CONFIG_HOME/qi/config.yaml`) and the database at the config's `database_path`, which `qi init` sets to `~/.local/share/qi/qi.db` (`$XDG_DATA_HOME/qi/qi.db` is used only when `database_path` is omitted). Paths may start with `~`, and relative paths resolve against the config file's directory.
 
 ```yaml
 database_path: ~/.local/share/qi/qi.db

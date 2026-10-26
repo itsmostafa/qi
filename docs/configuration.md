@@ -10,7 +10,7 @@ qi is configured with a single YAML file. A fully annotated example is at [`docs
 | `$XDG_CONFIG_HOME` set | `$XDG_CONFIG_HOME/qi/config.yaml` |
 | Custom | Pass `--config <path>` to any command |
 
-Every command except `qi init` needs this file and fails if it is missing. `qi init` writes a starter file when none exists (it includes a sample `~/notes` collection; edit or remove it) and creates the database the file points at. `qi index <path>` and `qi hook install <path>` add a new collection to the file themselves.
+`qi index`, `search`, `query`, `get`, `list`, `stats`, `delete` and `hook` need this file and fail if it is missing; `qi update`, `--version` and `--help` work without it, and `qi doctor` reports a missing file as a failed check. `qi init` writes a starter file when none exists (it includes a sample `~/notes` collection; edit or remove it) and creates the database the file points at. `qi index <path>` and `qi hook install <path>` add a new collection to the file themselves.
 
 ---
 
@@ -22,7 +22,7 @@ Path to the SQLite database. A leading `~` is expanded, and a relative path is r
 database_path: ~/.local/share/qi/qi.db
 ```
 
-Default: `~/.local/share/qi/qi.db` (or `$XDG_DATA_HOME/qi/qi.db`).
+The file `qi init` writes sets `~/.local/share/qi/qi.db`. When `database_path` is omitted, qi uses `$XDG_DATA_HOME/qi/qi.db`, or `~/.local/share/qi/qi.db` when that variable is unset.
 
 ---
 
