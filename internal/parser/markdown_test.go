@@ -23,7 +23,7 @@ func bodyText(doc *Document) string {
 	return b.String()
 }
 
-// The repro from docs/audit-2026-09-03.md:380 — list text was dropped entirely,
+// Regression: list text was dropped entirely,
 // leaving bare "-" markers.
 func TestListItemTextIsIndexed(t *testing.T) {
 	doc := parseMD(t, "# List\n\n- alpha uniqueitem\n- beta seconditem\n")
@@ -227,7 +227,7 @@ func TestUndecodableFrontmatterIsStillStripped(t *testing.T) {
 	}
 }
 
-// docs/audit-2026-09-03.md:413 — a heading-only file indexed zero chunks, so
+// Regression: a heading-only file indexed zero chunks, so
 // `qi search Unicorn` found nothing.
 func TestHeadingOnlyDocumentIsSearchable(t *testing.T) {
 	doc := parseMD(t, "# Unicorn Project\n")
