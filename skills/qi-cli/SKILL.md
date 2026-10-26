@@ -1,6 +1,6 @@
 ---
 name: qi-cli
-description: Guide for using qi, a local knowledge search CLI for macOS and Linux. Use this skill when the user wants to index documents into a searchable knowledge base, search or retrieve from one, configure qi's collections or embedding providers (Ollama, OpenAI-compatible), choose between its search modes (BM25, hybrid, vector), or diagnose why qi search results look wrong — or on any mention of the qi CLI.
+description: Guide for using qi, a local knowledge search CLI for macOS and Linux. Use this skill when the user wants to index documents into a searchable knowledge base, search or retrieve from one, configure qi's collections or embedding providers (Ollama, OpenAI-compatible), choose between its search modes (lexical BM25 or hybrid BM25 + vector), or diagnose why qi search results look wrong — or on any mention of the qi CLI.
 ---
 
 qi is a local-first knowledge search CLI. It indexes documents into SQLite and supports BM25 full-text search and vector/hybrid search (with a local or remote embedding provider).
@@ -8,13 +8,14 @@ qi is a local-first knowledge search CLI. It indexes documents into SQLite and s
 ## Quick Start
 
 ```bash
-qi init                                   # Create config + database
-$EDITOR ~/.config/qi/config.yaml         # Add collections and (optionally) providers
-qi index                                  # Index the current directory, or a collection
+qi init                                   # Create config + database (config lists a sample ~/notes collection)
+qi index ~/notes                          # Index a directory; it is saved to config as a collection
 qi doctor                                 # Verify setup
 qi search "your query"                    # BM25 keyword search (no provider needed)
-qi query "your semantic question"         # Hybrid search (needs embedding provider)
+qi query "your semantic question"         # Hybrid search; keyword-only, with a warning, if no provider is configured
 ```
+
+`index`, `search`, `query`, `get`, `list`, `stats`, `delete` and `hook` need a config file, so run `qi init` first. `qi update`, `--version` and `--help` work without one, and `qi doctor` reports a missing file as a failed check.
 
 ---
 
@@ -27,18 +28,25 @@ Writes `~/.config/qi/config.yaml` (if absent) and initializes the SQLite databas
 qi init
 ```
 
-### `qi index [path|collection]`
-Indexes documents. A file whose size and mtime match the last run is skipped without being read; otherwise SHA-256 content hashing decides whether it changed. Files over 10 MiB are skipped (counted in `skipped`). A second `qi index` against the same database waits for the first to finish rather than failing. Formats: `.md`/`.markdown`/`.mdx` (Markdown; MDX `import`/`export` and JSX tag lines are ignored), `.rst` (reStructuredText) and `.adoc`/`.asciidoc` (AsciiDoc) are split at section titles into heading paths; any other configured extension is plain text. Embeddings are generated at index time — if you add an embedding provider to config after an initial index run, re-run `qi index` to populate the missing embeddings.
+### `qi index [path|collection]...`
+Indexes documents. A file whose size and mtime match the last run is skipped without being read; otherwise SHA-256 content hashing decides whether it changed. Files over 10 MiB and binary files (a NUL byte in the first 8000 bytes) are skipped and counted in `skipped`, as are hidden directories, common tool directories (`node_modules`, `vendor`, `dist`, `build`, …) and symlinks. Documents whose files are gone are deleted from the database in the same run. A second `qi index` against the same database waits for the first to finish rather than failing. Use `--force` to reprocess unchanged files, e.g. after a qi upgrade changes parsing.
+
+Without an `extensions` list, a collection indexes only `.md`, `.markdown`, `.txt` and `.text`. List other formats explicitly: `.mdx` (Markdown; MDX `import`/`export` and JSX tag lines are ignored), `.rst` (reStructuredText) and `.adoc`/`.asciidoc` (AsciiDoc) are split at section titles into heading paths; any other listed extension is plain text.
+
+Embeddings are generated at index time. If you add an embedding provider after an initial index run, or change its `model`, `dimension`, `base_url` or `max_input_chars`, re-run `qi index` to embed what is missing or stale.
+
+An argument starting with `/`, `./`, `../` or `~` (or `.`/`..`) is a path; anything else is a collection name. A new path is saved to config as a collection named after its own directory (`~/Projects/tools/qi` → `qi`); when two collections would share a name, each takes leading path segments until unique (`work-notes`, `personal-notes`). There is no `--name` flag. `qi list` shows current names.
 
 ```bash
 qi index                              # indexes current working directory
-qi index ~/notes                      # any absolute or relative path
-qi index notes                        # generated collection name from config
+qi index ~/notes                      # an absolute or ~ path
+qi index ./docs                       # a relative path needs ./ (plain "docs" is a collection name)
+qi index notes wiki                   # collections by name; several arguments are indexed in turn
 qi index --changed-since ORIG_HEAD .  # no-op unless an indexed file changed since that git revision
 ```
 
 ### `qi hook install [path|collection]`
-Installs `post-merge`, `post-rewrite` and `post-commit` git hooks in the repository holding the collection. After `git pull` (merge, rebase or squash) or the commit that concludes a conflicted merge, every configured collection inside that repository is reindexed in the background with `qi index --changed-since <sha>`; pulls that touch no indexed file return immediately, and ordinary commits cost nothing. Output goes to `qi-index.log` in the git directory. Respects `core.hooksPath`; reinstalling (for any collection in the same repo) rewrites the same hooks, and a hook qi did not write is left alone with the line to add printed instead.
+Installs `post-merge`, `post-rewrite` and `post-commit` git hooks in the repository holding the collection. After `git pull` (merge or rebase) or the commit that concludes a conflicted merge, every configured collection inside that repository is reindexed in the background with `qi index --changed-since <sha>`; pulls that touch no indexed file return immediately, and ordinary commits cost one git call. A squash pull leaves no base commit to diff against, so it runs a plain `qi index`, which still skips unchanged files by stat. Installing also registers the collection in config if it is new. Output goes to `qi-index.log` in the git directory. Respects `core.hooksPath`; reinstalling (for any collection in the same repo) rewrites the same hooks, and a hook qi did not write is left alone with the line to add printed instead.
 
 ```bash
 qi hook install                       # the current directory's repository
@@ -54,7 +62,7 @@ qi search "deploy" -c wiki -n 5
 ```
 
 ### `qi query <query>`
-Semantic/hybrid search. Falls back gracefully to BM25 if the embedding provider is unavailable.
+Semantic/hybrid search. Falls back to BM25 and prints a warning on stderr when no embedding provider is configured, or when embedding the query or the vector search fails.
 
 ```bash
 qi query "how does auth work"
@@ -66,7 +74,7 @@ qi query "question" --explain               # show BM25/vector/RRF score breakdo
 
 **Modes:**
 - `lexical` — BM25 only
-- `hybrid` — BM25 + vector fused with RRF; skips vector if BM25 has a clear winner
+- `hybrid` — BM25 + vector fused with RRF; skips vector if BM25 has a clear winner. Vector scoring covers only BM25's candidate documents (topped up with any-term matches), so a document sharing no word with the query surfaces only when BM25 finds nothing at all
 - `deep` — alias for `hybrid`
 
 With no `--mode`, the mode comes from `search.default_mode` in the config (`hybrid` by default).
@@ -102,10 +110,10 @@ qi delete notes
 ```
 
 ### `qi stats`
-Show document counts, chunk counts, embedding counts, and database size per collection. If `Embeddings` count is much lower than `Chunks` count, vector search has no data to work with — re-run `qi index`.
+Show document counts, chunk counts, embedding health, and database size per collection. If `Embeddings` reports missing or stale vectors, vector search lacks data for those chunks — re-run `qi index`.
 
 ### `qi doctor`
-Health-check config, database, collection paths, and embedding coverage. It does **not** contact the provider: a `SKIP` line means no embedding provider is configured, not that one is unreachable. When none is configured, `qi query` silently falls back to BM25.
+Health-check config, database, collection paths, and embedding coverage (missing, stale, orphaned or corrupt vectors, with the command that repairs each). It does **not** contact the provider: a `SKIP` line means no embedding provider is configured, not that one is unreachable. When none is configured, `qi query` falls back to BM25 with a warning.
 
 ### `qi update`
 Update the binary in place from the latest GitHub release.
@@ -153,15 +161,14 @@ being ranked, so an in-scope hit is not lost behind out-of-scope ones.
 database_path: ~/.local/share/qi/qi.db
 
 collections:
-  - name: notes
+  - name: notes                           # regenerated from the path on load
     path: ~/notes
     extensions: [.md, .txt]
-    ignore: [.git]
+    ignore: [drafts, "*.draft.md"]        # path.Match globs on the relative path, basename or any parent dir
 
   - name: wiki
     path: ~/wiki
-    extensions: [.md, .txt]
-    ignore: [.git]
+    extensions: [.md, .mdx, .rst, .adoc]
 
 providers:
   embedding:                              # optional — enables vector/hybrid search
@@ -180,7 +187,7 @@ search:
   extension_boost: 2.0                     # optional — score multiplier for preferred extensions (default 2.0)
 ```
 
-`base_url` and `api_key` support `${VAR}` environment-variable expansion, and a trailing `/v1` in `base_url` is normalized automatically (no doubled `/v1/v1`).
+`base_url` and `api_key` support `${VAR}` environment-variable expansion, and a trailing `/v1` in `base_url` is normalized automatically (no doubled `/v1/v1`). Relative paths resolve against the config file's directory. `.git`, `node_modules` and other tool directories are always skipped, so they need no `ignore` entry. Changing `model`, `dimension`, `base_url`, `max_input_chars` or the provider `name` makes existing vectors stale until the next `qi index` re-embeds them; `api_key` and `batch_size` (default 32) do not.
 
 ### Common provider setups
 
@@ -197,10 +204,9 @@ providers:
 ```yaml
 providers:
   embedding:
-    base_url: https://api.openai.com/v1
+    name: openai                          # fills in base_url and api_key (from OPENAI_API_KEY) when left empty
     model: text-embedding-3-small
     dimension: 1536
-    api_key: sk-...
 ```
 
 ---
@@ -208,8 +214,9 @@ providers:
 ## How search works
 
 - **BM25** — SQLite FTS5. Always available, very fast, good for keyword queries.
-- **Vector KNN** — Cosine similarity over embedding BLOBs in SQLite. Requires an embedding provider. Captures semantic intent.
-- **Hybrid (RRF)** — Runs both, fuses rankings with Reciprocal Rank Fusion (`score = Σ 1/(k + rank)`). Skips vector if BM25 has a dominant winner (top score > 3× second place).
+- **Vector** — Cosine similarity, computed in Go, over embedding BLOBs stored in SQLite. Requires an embedding provider. Captures semantic intent. Used only inside hybrid mode, where it scores the chunks of BM25's candidate documents, and scans every embedded chunk only when BM25 finds nothing.
+- **Hybrid (RRF)** — Runs both, fuses rankings with Reciprocal Rank Fusion (`score = Σ 1/(k + rank)`), counting each document once at its best rank. Skips vector if BM25 has a dominant winner (top score > 3× second place).
+- Results are one per document: a document is represented by its best chunk.
 - **Deep** — Accepted as an alias of Hybrid.
 
 ---
@@ -281,20 +288,20 @@ Work through these steps in order:
 ```bash
 qi doctor
 ```
-Look for `OK` next to the embedding provider. `SKIP` means qi didn't parse the provider config — common causes: wrong YAML key name (`embedding` not `embeddings`), missing `dimension` field, or bad indentation (must be under `providers:`).
+Look for an `embeddings:` line with `OK`. `SKIP  embedding provider (not configured)` means qi found no provider block — common causes: wrong YAML key name (`embedding` not `embeddings`) or bad indentation (it must be under `providers:`). A missing or zero `dimension` is different: the config fails to load and every command reports the error.
 
 **2. Check if embeddings were actually generated**
 ```bash
 qi stats
 ```
-If `Embeddings` is 0 or far less than `Chunks`, the vectors were never written. This happens when the embedding provider was added to config *after* the initial `qi index` run — re-index to fix it:
+If `Embeddings` reports missing or stale vectors, they were never written or no longer match the provider. This happens when the embedding provider was added to config *after* the initial `qi index` run, or when its model, dimension or URL changed — re-index to fix it:
 ```bash
 qi index <collection-name>
 ```
 Only chunks missing embeddings are re-processed; unchanged files aren't re-parsed.
 
 **3. Verify the provider is reachable at query time**
-`qi query` embeds the query string at runtime. If the provider is down, qi silently falls back to BM25 without an error. Test connectivity:
+`qi query` embeds the query string at runtime. If the provider is down, qi falls back to BM25 and prints `embedding query failed, falling back to BM25` on stderr, but exits successfully. Test connectivity:
 ```bash
 # Ollama:
 curl http://localhost:11434/v1/embeddings -H "Content-Type: application/json" \
@@ -308,4 +315,4 @@ qi query "your question" --explain
 ```
 This shows each result's BM25 rank, vector rank, and fused RRF score. If every result is missing a vector rank, the vector path isn't contributing — confirming one of the issues above.
 
-**Note:** hybrid mode also skips vector search if the top BM25 score is more than 3× the second result (intentional optimization for dominant keyword matches). If your queries are exact keyword matches, try a more paraphrased, natural-language query to avoid this shortcut.
+**Note:** hybrid mode also skips vector search if the top BM25 score is more than 3× the second result (intentional optimization for dominant keyword matches). If your queries are exact keyword matches, try a more paraphrased, natural-language query to avoid this shortcut. When BM25 finds at least one candidate, vector scoring covers only those candidates, so a document with no word in common with the query cannot be pulled in by meaning alone. When BM25 finds nothing, qi scans every embedded chunk, and such a document can surface.

@@ -1,42 +1,53 @@
 # qi configuration — annotated example
 # Copy to ~/.config/qi/config.yaml and customize.
 
-# Path to the SQLite database (supports ~ expansion)
+# Path to the SQLite database. ~ is expanded; a relative path is resolved
+# against this file's directory. Default: ~/.local/share/qi/qi.db
 database_path: ~/.local/share/qi/qi.db
 
-# Collections: directories of documents to index.
-# Names are generated from paths; keep name aligned with path.
+# Collections: directory trees to index, each searched under one name.
+# The name is generated from the path when the config loads (~/notes -> notes;
+# ~/work/notes and ~/personal/notes -> work-notes and personal-notes), so the
+# name written here is informational. qi index <path> adds entries for you.
 collections:
   - name: notes
     path: ~/notes
     description: Personal notes and documents
     extensions: [.md, .txt]     # Omit to use defaults (.md, .markdown, .txt, .text)
-    ignore: [.git, node_modules, .DS_Store]
+    ignore: [drafts, "*.draft.md"]   # Globs; dot-directories and node_modules etc. are always skipped
 
   - name: wiki
     path: ~/wiki
     description: Team wiki and documentation
-    extensions: [.md, .txt]
-    ignore: [.git, .DS_Store]
+    extensions: [.md, .mdx, .rst, .adoc]
+    ignore: [archive]
 
 providers:
-  # Embedding provider for vector search (OpenAI-compatible /v1/embeddings)
-  # Uncomment to enable hybrid search with local Ollama or llama.cpp
+  # Embedding provider for vector search (OpenAI-compatible /v1/embeddings).
+  # Uncomment to enable hybrid search with a local server such as Ollama.
+  # Changing name, base_url, model, dimension or max_input_chars re-embeds
+  # every chunk on the next qi index.
   # embedding:
   #   name: ollama
   #   base_url: http://localhost:11434      # ${VAR} env references are expanded
   #   model: nomic-embed-text
   #   dimension: 768
-  #   batch_size: 32
+  #   batch_size: 32           # texts per request (default 32)
   #   max_input_chars: 24000   # optional safety net: truncate texts over ~6k tokens (omit/0 = no limit)
-  #   api_key: ${OPENAI_API_KEY}   # optional; ${VAR} is read from the environment
+  #   api_key: ${EMBED_API_KEY}   # optional; ${VAR} is read from the environment
 
+  # Or OpenAI: base_url defaults to https://api.openai.com and api_key to
+  # $OPENAI_API_KEY when name is openai.
+  # embedding:
+  #   name: openai
+  #   model: text-embedding-3-small
+  #   dimension: 1536
 
 search:
-  default_mode: hybrid   # lexical | hybrid | deep
-  bm25_top_k: 50         # Candidates from BM25 for fusion
-  vector_top_k: 50       # Candidates from vector search for fusion
+  default_mode: hybrid   # qi query mode: lexical | hybrid (deep is an alias for hybrid)
+  bm25_top_k: 50         # Candidate documents from BM25
+  vector_top_k: 50       # Candidate documents from vector search for fusion
   rrf_k: 60              # Reciprocal Rank Fusion constant (default 60)
   chunk_size: 512        # Target chunk size in characters
-  # prefer_extensions: [.md, .txt]   # Boost scores for these file types
+  # prefer_extensions: [.md, .txt]   # Boost these file types in hybrid qi query results
   # extension_boost: 2.0             # Multiplier applied to preferred extensions (default 2.0)
