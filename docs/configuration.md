@@ -10,13 +10,13 @@ qi is configured with a single YAML file. A fully annotated example is at [`docs
 | `$XDG_CONFIG_HOME` set | `$XDG_CONFIG_HOME/qi/config.yaml` |
 | Custom | Pass `--config <path>` to any command |
 
-`qi init` creates the file with sensible defaults on first run.
+Every command except `qi init` needs this file and fails if it is missing. `qi init` writes a starter file when none exists (it includes a sample `~/notes` collection; edit or remove it) and creates the database the file points at. `qi index <path>` and `qi hook install <path>` add a new collection to the file themselves.
 
 ---
 
 ## `database_path`
 
-Path to the SQLite database. Supports `~` expansion and paths relative to the config file.
+Path to the SQLite database. A leading `~` is expanded, and a relative path is resolved against the directory that holds the config file.
 
 ```yaml
 database_path: ~/.local/share/qi/qi.db
@@ -28,42 +28,70 @@ Default: `~/.local/share/qi/qi.db` (or `$XDG_DATA_HOME/qi/qi.db`).
 
 ## `collections`
 
-A list of document directories to index.
+A list of collections. A collection is one directory tree that qi indexes and searches under a single name.
 
 ```yaml
 collections:
   - name: notes
     path: ~/notes
     description: Personal notes       # optional
-    extensions: [.md, .txt]           # optional — omit to use text defaults (.md, .markdown, .txt, .text)
-    ignore: [.git, node_modules, "*.draft.md"]  # optional
+    extensions: [.md, .mdx, .txt]     # optional — omit to use the defaults (.md, .markdown, .txt, .text)
+    ignore: [drafts, "*.draft.md"]    # optional
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | no | Generated identifier used in search output and CLI flags; filled from `path` if omitted |
-| `path` | yes | Directory to index; supports `~` and relative paths |
+| `name` | no | Generated from `path` when the config loads; the value in the file is not used as the name (see below). Search output and `-c` use the generated name |
+| `path` | yes | Directory to index; a leading `~` is expanded and a relative path is resolved against the config file's directory |
 | `description` | no | Human-readable label |
-| `extensions` | no | File extensions to index; omit to use built-in defaults (`.md .markdown .txt .text`). Setting it replaces the defaults. `.md`, `.markdown` and `.mdx` are parsed as Markdown (in `.mdx`, `import`/`export` lines and JSX tag lines are ignored and text inside JSX blocks is indexed); `.rst` as reStructuredText and `.adoc`/`.asciidoc` as AsciiDoc, with section titles as heading paths; every other extension is indexed as plain text. Files over 10 MiB are skipped, as are binary files (a NUL byte in the first 8000 bytes) whatever their extension. Unchanged files are not reparsed after an upgrade that changes parsing: run `qi index --force <collection>` once, for example after upgrading if you already indexed `.mdx` files as plain text |
+| `extensions` | no | File extensions to index; omit to use the defaults (`.md .markdown .txt .text`). Setting it replaces the defaults, so `.mdx`, `.rst`, `.adoc` and `.asciidoc` are indexed only when listed. Entries are case-insensitive and the leading dot is optional (`md` and `.MD` both mean `.md`). `.md`, `.markdown` and `.mdx` are parsed as Markdown (in `.mdx`, `import`/`export` lines and JSX tag lines are ignored and text inside JSX blocks is indexed); `.rst` as reStructuredText and `.adoc`/`.asciidoc` as AsciiDoc, with section titles as heading paths; every other listed extension is indexed as plain text. Unchanged files are not reparsed after an upgrade that changes parsing: run `qi index --force <collection>` once, for example after upgrading if you already indexed `.mdx` files as plain text |
 | `ignore` | no | Globs of directories and files to skip during indexing |
 
-Each `ignore` entry is a glob matched against a file's collection-relative
-path, its basename and every parent directory, so `node_modules` skips the
-directory anywhere in the tree, `drafts/*` skips everything under `drafts`, and
-`*.draft.md` skips those files at any depth. A plain name is still the exact
-match it has always been. Negation (`!`) and `.gitignore` files are not
-supported. Adding a pattern removes the files it now covers on the next
-`qi index`, the same way a deleted file is removed.
+Each `ignore` entry is a glob (Go `path.Match` syntax: `*`, `?`, `[...]`)
+matched against a file's collection-relative path, its basename and every
+parent directory. So `drafts` and `drafts/*` both skip everything under a
+top-level `drafts` directory, `archive` skips a directory or file named
+`archive` at any depth, and `*.draft.md` skips those files at any depth.
+Negation (`!`) and `.gitignore` files are not supported. A malformed glob is
+rejected when the config loads. Adding a pattern removes the files it now
+covers on the next `qi index`, the same way a deleted file is removed. The
+`--path` filter on `qi search` and `qi query` uses the same matching, so
+`--path 'meetings/*'` limits results to files under `meetings`.
 
-Collection names are the directory's own name, so `/Users/alice/Projects/tools/qi` becomes `qi`. When two collections would share a name, both take on as many leading path segments as it takes to tell them apart: `~/work/notes` and `~/personal/notes` become `work-notes` and `personal-notes`, while unaffected collections keep their short names. Names that still collide, and duplicate canonical paths, are rejected at startup.
+Some directories are always skipped, without an `ignore` entry: every
+directory whose name starts with `.` (`.git`, `.obsidian`, ...), and any
+directory named `node_modules`, `vendor`, `venv`, `__pycache__`, `target`,
+`dist`, `build` or `out`, along with a few other tool caches. The
+collection's own root is never skipped, so a collection at `~/.notes` or
+`~/build` still indexes. Symlinks inside a collection are not followed.
+
+Files over 10 MiB are skipped, as are binary files (a NUL byte in the first
+8000 bytes) whatever their extension.
+
+A collection's name is its directory's own name: `~/Projects/tools/qi`
+becomes `qi`. When two collections would share a name, each takes on leading
+path segments until the names differ, while other collections keep their short
+names. For example, with these three paths:
+
+| Path | Name |
+|------|------|
+| `~/work/notes` | `work-notes` |
+| `~/personal/notes` | `personal-notes` |
+| `~/wiki` | `wiki` |
+
+Segments are counted from your home directory, so a path directly under `~`
+has only one segment to give and keeps its name: `~/notes` next to
+`~/work/notes` gives `notes` and `work-notes`. Two entries that still end up
+with the same name, or that point at the same directory, are rejected when the
+config loads. See [Collections](named-collections.md) for how renames work.
 
 ---
 
 ## `providers`
 
-All providers are optional. Omitting them degrades gracefully: BM25 search always works without any provider configured.
+The only provider is `embedding`, and it is optional: BM25 search works without it.
 
-**Environment variables**: `${VAR}` references in any provider's `base_url` and `api_key` are expanded from the environment when the config loads, so you can keep secrets out of the file:
+**Environment variables**: `${VAR}` (or `$VAR`) references in `base_url` and `api_key` are expanded from the environment when the config loads, so you can keep secrets out of the file. An unset variable expands to an empty string.
 
 ```yaml
 providers:
@@ -77,7 +105,7 @@ providers:
 
 ### `providers.embedding`
 
-Enables vector search and hybrid mode (`--mode hybrid`). Must expose an OpenAI-compatible `POST /v1/embeddings` endpoint.
+Enables vector search and hybrid mode (`qi query --mode hybrid`). The server must expose an OpenAI-compatible `POST /v1/embeddings` endpoint. With a provider configured, `qi index` embeds every chunk of the collection that lacks a current vector at the end of each run.
 
 ```yaml
 providers:
@@ -93,13 +121,15 @@ providers:
 
 | Field | Description |
 |-------|-------------|
-| `name` | Identifier (see recipes below) |
+| `name` | Free-form label stored with each vector (see recipes below). Only `openai` changes behaviour |
 | `base_url` | Base URL of the embedding server |
 | `model` | Model name passed in the API request |
-| `dimension` | Output vector dimension — must match the model |
-| `batch_size` | Texts per HTTP request; reduce if the server has payload limits |
+| `dimension` | Output vector dimension; must be positive and match the model |
+| `batch_size` | Texts per HTTP request (default `32`); reduce if the server has payload limits |
 | `max_input_chars` | Safety net: truncate any text longer than this many characters before embedding. `0` (default) disables truncation. Set it for models with a hard token limit — e.g. `24000` (~6k tokens) for an 8k-token model |
 | `api_key` | Bearer token; set for services that require authentication |
+
+The embedding fingerprint is a hash of `name`, `base_url`, `model`, `dimension` and `max_input_chars`, stored with every vector. Changing any of those five fields makes search ignore the existing vectors, and the next `qi index` of each collection re-embeds all of its chunks. Changing `api_key` or `batch_size` does not.
 
 **Recipes**
 
@@ -141,7 +171,7 @@ embedding:
   # base_url and api_key are filled automatically from OPENAI_API_KEY
 ```
 
-When `name: openai`, qi sets `base_url` to `https://api.openai.com` and reads `api_key` from the `OPENAI_API_KEY` environment variable. You can override either field explicitly.
+When `name: openai` and the field is empty, qi sets `base_url` to `https://api.openai.com` and reads `api_key` from the `OPENAI_API_KEY` environment variable. Setting either field explicitly overrides it.
 
 Other OpenAI-compatible services (e.g. Azure, Together, Mistral):
 ```yaml
@@ -172,15 +202,15 @@ search:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `default_mode` | `hybrid` | Search mode used when `--mode` is not passed. `lexical` = BM25 only; `hybrid` = BM25 + vector with RRF fusion; `deep` = accepted as an alias of `hybrid` |
-| `bm25_top_k` | `50` | Candidate **documents** retrieved from BM25 before fusion (a document is represented by its best-matching chunk) |
-| `vector_top_k` | `50` | Candidate **documents** retrieved from vector KNN before fusion |
+| `default_mode` | `hybrid` | Mode `qi query` uses when `--mode` is not passed. `lexical` = BM25 only; `hybrid` = BM25 + vector with RRF fusion; `deep` = accepted as an alias of `hybrid`. `qi search` always uses BM25 |
+| `bm25_top_k` | `50` | Candidate **documents** retrieved from BM25 by `qi search` and `qi query` (a document is represented by its best-matching chunk) |
+| `vector_top_k` | `50` | Candidate **documents** retrieved from vector search before fusion; raised to `--limit` when the limit is larger |
 | `rrf_k` | `60` | Reciprocal Rank Fusion constant; higher values reduce the influence of rank position |
 | `chunk_size` | `512` | Target chunk size in characters during indexing. Must be positive; a value `≤ 0` is rejected at load time |
-| `prefer_extensions` | _(none)_ | File extensions whose result scores are multiplied by `extension_boost`, then re-sorted. Empty disables boosting |
+| `prefer_extensions` | _(none)_ | File extensions whose result scores are multiplied by `extension_boost`, then re-sorted. Applies to `qi query` in hybrid mode with an embedding provider configured; `qi search` and lexical mode ignore it. Empty disables boosting |
 | `extension_boost` | `2.0` | Score multiplier applied to results matching `prefer_extensions`. Only used when `prefer_extensions` is set; values `≤ 0` fall back to `2.0` |
 
-`default_mode: hybrid` requires an embedding provider; if it is absent, qi falls back to `lexical` with a warning. An unknown `default_mode` is rejected at load time.
+Hybrid mode needs an embedding provider; without one, `qi query` prints a warning and runs a lexical search. An unknown `default_mode` is rejected at load time.
 
 ---
 
