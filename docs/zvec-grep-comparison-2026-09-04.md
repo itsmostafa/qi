@@ -125,6 +125,8 @@ search whose only in-scope document ranks below every out-of-scope one.
 
 **Verify:** edited/deleted files, failed reads preserving old content, interrupted indexing, and status distinguishing lexical readiness from semantic readiness.
 
+**Implementation follow-up (2026-10-25):** no `qi status` command exists. Freshness comes from git pull hooks rather than a watcher: `qi hook install` runs `qi index --changed-since` after a merge, rebase or merge commit (`34c3c51`, `6a302c7`, 2026-09-22). A file whose size and mtime are unchanged is not re-read (`82b30c4`), and index runs serialize on `<database>.index-lock`. Search results still carry no freshness signal.
+
 ## 5. P2: Add compact, bounded evidence output (small to medium)
 
 zg offers selectable previews and compact agent output ([output contract](https://github.com/zvec-ai/zvec-grep/blob/52653951b24617762f4ab0c71c34d594e5001617/docs/04-pipeline.md#output-for-agents-and-people)). qi supports text/Markdown/JSON, but `internal/output/formatter.go` prints available snippets without a search-response byte budget; vector results carry entire chunk text (`internal/search/vector.go:66`).
@@ -161,6 +163,8 @@ zg extracts code symbols/signatures and uses metadata in embedding content ([vec
 
 Add useful text formats first, then Go/code structure only if repository search is a target workflow. Raw HTML/JSON text is not equivalent to a format-aware parser. PDF/Office support should not be credited as an existing zg advantage: its current pipeline explicitly skips those binary formats. Graph retrieval, native GUI, and mobile are roadmap items, not shipped parity requirements.
 
+**Implementation follow-up (2026-10-25):** `.rst` and `.adoc`/`.asciidoc` are parsed for headings and titles with body lines kept verbatim, and `.mdx` goes through the Markdown parser with import/export and JSX lines blanked (`f31346a`, 2026-09-22). Code and symbol parsing has not been added.
+
 ## 11. P2: Establish retrieval and agent-efficiency evaluations (medium)
 
 zg includes reproducible paired agent evaluations ([benchmark protocol](https://github.com/zvec-ai/zvec-grep/blob/52653951b24617762f4ab0c71c34d594e5001617/benchmarks/README.md)). qi has correctness tests but no comparable checked-in quality/performance evaluation suite identified in this audit.
@@ -172,6 +176,8 @@ Create a held-out corpus with exact terms, paraphrases, dates, duplicate-heavy f
 zg uses HNSW ([storage schema](https://github.com/zvec-ai/zvec-grep/blob/52653951b24617762f4ab0c71c34d594e5001617/src/engine/storage/zvec.ts#L934)). qi loads candidate vectors and chunk text, computes cosine distances, and sorts all candidates (`internal/search/vector.go:82`). This has a clear scaling cost but is simple and exact.
 
 Benchmark representative collection sizes. First consider retaining only the best chunk per document, bounded top-k selection, and loading text after candidate selection. Adopt an ANN backend only if latency warrants the recall/storage/dependency tradeoff; retain the CGo-free fallback.
+
+**Implementation follow-up (2026-10-25):** all three first steps landed: the best chunk per document is kept before truncation (`ebaa2f7`); the vector scan reads only IDs, paths and vectors and fetches text for the top results afterwards (`b657d78`, `86f97ba`); and hybrid search scores only BM25's candidate documents (`602f258`), which took a hybrid query from 1.41s to 0.01–0.06s on a 424k-chunk corpus. A query with no lexical match still scans the whole corpus. `ext/vec1` was evaluated and rejected (see the vec1 note in CLAUDE.md), so no approximate-nearest-neighbor index has been adopted.
 
 ## What qi should keep
 
@@ -193,3 +199,5 @@ Benchmark representative collection sizes. First consider retaining only the bes
 The original audit proposed these changes without changing code or running
 `task check`. Findings 1, 2 and 3 now have implementation follow-ups above; the
 remaining findings are still proposals.
+
+**Update (2026-10-25, `1dbf021`):** findings 10 and 12 have also landed, and finding 4 in part (pull hooks, no `qi status`). Findings 5–9 and 11 remain proposals; `qi get --max-bytes` is the only bounded output.

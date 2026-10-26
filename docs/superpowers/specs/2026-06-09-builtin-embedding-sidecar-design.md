@@ -3,6 +3,8 @@
 **Date:** 2026-06-09
 **Status:** Approved pending review
 
+**Status (2026-10-25, `1dbf021`):** not implemented. There is no `internal/modelhub`, `internal/sidecar` or `builtin` provider; embedding still requires an external OpenAI-compatible server. Three of the four failure modes in the motivation were closed without it in `624bbb2`: the embedding fingerprint invalidates vectors when the model, endpoint or dimension changes (`internal/config/config.go:37`), the provider rejects vectors of the wrong dimension (`internal/providers/embedding.go:190`), and `qi doctor` reports embedding health. Task prefixes are still missing: there is no `document_prefix` or `query_prefix` setting.
+
 ## Motivation
 
 Today, vector search requires users to install and run an external embedding
